@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Node, ReactFlowInstance } from "@xyflow/react";
-import { useNodesState } from "@xyflow/react";
+import {
+  MarkerType,
+  addEdge,
+  type Connection,
+  type Node,
+  type ReactFlowInstance,
+} from "@xyflow/react";
+import { useEdgesState, useNodesState } from "@xyflow/react";
 import { Toaster, toast } from "sonner";
 import { EditorBottomControls } from "@/components/editor/editor-bottom-controls";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
@@ -17,9 +23,28 @@ import {
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchLatestDiagram, updateDiagram } from "@/lib/diagram/api";
-import { createDefaultNodeRecord, DEFAULT_VIEWPORT } from "@/lib/diagram/defaults";
-import { toDiagramDocument, toFlowNodes, type EditorNodeData } from "@/lib/diagram/mapper";
-import type { DiagramViewport, EditorTool, DiagramNodeType } from "@/lib/diagram/types";
+import {
+  createDefaultNodeRecord,
+  DEFAULT_GRID_SIZE,
+  DEFAULT_SETTINGS,
+  DEFAULT_VIEWPORT,
+} from "@/lib/diagram/defaults";
+import { createHistory, type DiagramSnapshot } from "@/lib/diagram/history";
+import {
+  toDiagramDocument,
+  toFlowEdges,
+  toFlowNodes,
+  type EditorEdge,
+  type EditorNodeData,
+} from "@/lib/diagram/mapper";
+import { snapNodePosition, snapPosition } from "@/lib/diagram/snap";
+import type {
+  DiagramEdgeType,
+  DiagramNodeType,
+  DiagramSettings,
+  DiagramViewport,
+  EditorTool,
+} from "@/lib/diagram/types";
 
 const AUTOSAVE_DELAY_MS = 800;
 
@@ -31,31 +56,162 @@ const createNodeId = () =>
 const isPlaceableNodeTool = (tool: EditorTool): tool is DiagramNodeType =>
   tool === "rectangle" || tool === "ellipse" || tool === "sticky";
 
+const isEditableTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName.toLowerCase();
+
+  return (
+    tagName === "input" ||
+    tagName === "textarea" ||
+    target.isContentEditable ||
+    target.closest("[contenteditable='true']") !== null
+  );
+};
+
 export function EditorShell() {
   const [diagramId, setDiagramId] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled Diagram");
   const [viewport, setViewport] = useState<DiagramViewport>(DEFAULT_VIEWPORT);
   const [canvasViewport, setCanvasViewport] = useState<DiagramViewport>(DEFAULT_VIEWPORT);
   const [canvasMountKey, setCanvasMountKey] = useState(0);
-  const [showGrid, setShowGrid] = useState(true);
+  const [gridVisible, setGridVisible] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(DEFAULT_SETTINGS.snapEnabled);
+  const [gridSize, setGridSize] = useState(DEFAULT_GRID_SIZE);
+  const [defaultEdgeType, setDefaultEdgeType] = useState<DiagramEdgeType>("smoothstep");
   const [activeTool, setActiveTool] = useState<EditorTool>("select");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [flowInstance, setFlowInstance] = useState<
-    ReactFlowInstance<Node<EditorNodeData>, never> | null
+    ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<EditorNodeData>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<EditorEdge>([]);
+
   const hasHydratedRef = useRef(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const historyRef = useRef<ReturnType<typeof createHistory> | null>(null);
+  const isDraggingNodeRef = useRef(false);
+  const isRestoringHistoryRef = useRef(false);
+  const currentSignatureRef = useRef("");
   const lastSavedSignatureRef = useRef<string>("");
+  const previousSignatureRef = useRef<string>("");
+  const changeVersionRef = useRef(0);
+
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  const viewportRef = useRef(viewport);
+  const snapEnabledRef = useRef(snapEnabled);
+  const gridSizeRef = useRef(gridSize);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  useEffect(() => {
+    snapEnabledRef.current = snapEnabled;
+  }, [snapEnabled]);
+
+  useEffect(() => {
+    gridSizeRef.current = gridSize;
+  }, [gridSize]);
+
+  const syncHistoryAvailability = useCallback(() => {
+    setCanUndo(historyRef.current?.canUndo() ?? false);
+    setCanRedo(historyRef.current?.canRedo() ?? false);
+  }, []);
+
+  const buildSnapshot = useCallback(
+    (overrides?: Partial<DiagramSnapshot>): DiagramSnapshot => ({
+      nodes: overrides?.nodes ?? nodesRef.current,
+      edges: overrides?.edges ?? edgesRef.current,
+      viewport: overrides?.viewport ?? viewportRef.current,
+      settings:
+        overrides?.settings ?? {
+          snapEnabled: snapEnabledRef.current,
+          gridSize: gridSizeRef.current,
+        },
+    }),
+    []
+  );
+
+  const pushHistorySnapshot = useCallback(
+    (overrides?: Partial<DiagramSnapshot>) => {
+      if (!hasHydratedRef.current || isRestoringHistoryRef.current || !historyRef.current) {
+        return;
+      }
+
+      historyRef.current.push(buildSnapshot(overrides));
+      syncHistoryAvailability();
+    },
+    [buildSnapshot, syncHistoryAvailability]
+  );
+
+  const applyHistorySnapshot = useCallback(
+    (snapshot: DiagramSnapshot) => {
+      isRestoringHistoryRef.current = true;
+
+      const normalizedEdges = snapshot.edges.map((edge) => ({
+        ...edge,
+        markerEnd: { type: MarkerType.ArrowClosed },
+      }));
+
+      setNodes(snapshot.nodes);
+      setEdges(normalizedEdges);
+      setViewport(snapshot.viewport);
+      setCanvasViewport(snapshot.viewport);
+      setSnapEnabled(snapshot.settings.snapEnabled);
+      setGridSize(snapshot.settings.gridSize);
+      void flowInstance?.setViewport(snapshot.viewport, { duration: 0 });
+
+      Promise.resolve().then(() => {
+        isRestoringHistoryRef.current = false;
+      });
+    },
+    [flowInstance, setEdges, setNodes]
+  );
+
+  const handleUndo = useCallback(() => {
+    const snapshot = historyRef.current?.undo();
+
+    if (!snapshot) {
+      return;
+    }
+
+    applyHistorySnapshot(snapshot);
+    syncHistoryAvailability();
+  }, [applyHistorySnapshot, syncHistoryAvailability]);
+
+  const handleRedo = useCallback(() => {
+    const snapshot = historyRef.current?.redo();
+
+    if (!snapshot) {
+      return;
+    }
+
+    applyHistorySnapshot(snapshot);
+    syncHistoryAvailability();
+  }, [applyHistorySnapshot, syncHistoryAvailability]);
 
   const handleNodeTextChange = useCallback((nodeId: string, nextText: string) => {
-    setNodes((currentNodes) =>
-      currentNodes.map((node) =>
-        node.id === nodeId
+    setNodes((currentNodes) => {
+      const updatedNodes = currentNodes.map((node) =>
+        node.id === nodeId && node.data.text !== nextText
           ? {
               ...node,
               data: {
@@ -64,9 +220,13 @@ export function EditorShell() {
               },
             }
           : node
-      )
-    );
-  }, [setNodes]);
+      );
+
+      pushHistorySnapshot({ nodes: updatedNodes });
+
+      return updatedNodes;
+    });
+  }, [pushHistorySnapshot, setNodes]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -80,21 +240,49 @@ export function EditorShell() {
         }
 
         const loadedNodes = toFlowNodes(diagram.data.nodes, handleNodeTextChange);
+        const loadedEdges = toFlowEdges(diagram.data.edges ?? []);
         const loadedViewport = diagram.data.viewport ?? DEFAULT_VIEWPORT;
+        const loadedSettings: DiagramSettings = {
+          snapEnabled: diagram.data.settings?.snapEnabled ?? DEFAULT_SETTINGS.snapEnabled,
+          gridSize: diagram.data.settings?.gridSize ?? DEFAULT_GRID_SIZE,
+        };
         const loadedTitle = diagram.title.trim().length > 0 ? diagram.title : "Untitled Diagram";
 
         setDiagramId(diagram.id);
         setTitle(loadedTitle);
         setNodes(loadedNodes);
+        setEdges(loadedEdges);
         setViewport(loadedViewport);
         setCanvasViewport(loadedViewport);
+        setSnapEnabled(loadedSettings.snapEnabled);
+        setGridSize(loadedSettings.gridSize);
+
+        const firstEdgeType = loadedEdges.find((edge) => edge.type === "straight")?.type;
+        setDefaultEdgeType(firstEdgeType === "straight" ? "straight" : "smoothstep");
+
         setCanvasMountKey((previous) => previous + 1);
         setLastSavedAt(diagram.updatedAt);
         setSaveStatus("saved");
+
+        historyRef.current = createHistory({
+          nodes: loadedNodes,
+          edges: loadedEdges,
+          viewport: loadedViewport,
+          settings: loadedSettings,
+        });
+        syncHistoryAvailability();
+
         lastSavedSignatureRef.current = JSON.stringify({
           title: loadedTitle,
-          data: diagram.data,
+          data: {
+            ...diagram.data,
+            edges: diagram.data.edges ?? [],
+            settings: loadedSettings,
+          },
         });
+        currentSignatureRef.current = lastSavedSignatureRef.current;
+        previousSignatureRef.current = lastSavedSignatureRef.current;
+        changeVersionRef.current = 0;
         hasHydratedRef.current = true;
       } catch (error) {
         toast.error(
@@ -112,7 +300,7 @@ export function EditorShell() {
     return () => {
       isCancelled = true;
     };
-  }, [handleNodeTextChange, setNodes]);
+  }, [handleNodeTextChange, setEdges, setNodes, syncHistoryAvailability]);
 
   useEffect(() => {
     return () => {
@@ -123,7 +311,14 @@ export function EditorShell() {
   }, []);
 
   const normalizedTitle = title.trim() || "Untitled Diagram";
-  const diagramDocument = useMemo(() => toDiagramDocument(nodes, viewport), [nodes, viewport]);
+  const diagramDocument = useMemo(
+    () =>
+      toDiagramDocument(nodes, edges, viewport, {
+        snapEnabled,
+        gridSize,
+      }),
+    [nodes, edges, viewport, snapEnabled, gridSize]
+  );
   const currentSignature = useMemo(
     () =>
       JSON.stringify({
@@ -134,6 +329,20 @@ export function EditorShell() {
   );
   const isDirty = currentSignature !== lastSavedSignatureRef.current;
 
+  useEffect(() => {
+    const previous = previousSignatureRef.current;
+    previousSignatureRef.current = currentSignature;
+    currentSignatureRef.current = currentSignature;
+
+    if (!hasHydratedRef.current) {
+      return;
+    }
+
+    if (previous && previous !== currentSignature) {
+      changeVersionRef.current += 1;
+    }
+  }, [currentSignature]);
+
   const saveDiagram = useCallback(async () => {
     if (!diagramId) {
       return;
@@ -143,6 +352,9 @@ export function EditorShell() {
       setSaveStatus("saved");
       return;
     }
+
+    const requestVersion = changeVersionRef.current;
+    const requestSignature = currentSignature;
 
     setSaveStatus("saving");
 
@@ -155,7 +367,15 @@ export function EditorShell() {
         },
       });
 
-      lastSavedSignatureRef.current = currentSignature;
+      if (
+        requestVersion !== changeVersionRef.current ||
+        requestSignature !== currentSignatureRef.current
+      ) {
+        setSaveStatus("idle");
+        return;
+      }
+
+      lastSavedSignatureRef.current = requestSignature;
       setLastSavedAt(updated.updatedAt);
       setSaveStatus("saved");
     } catch (error) {
@@ -170,6 +390,10 @@ export function EditorShell() {
     }
 
     if (currentSignature === lastSavedSignatureRef.current) {
+      return;
+    }
+
+    if (isDraggingNodeRef.current) {
       return;
     }
 
@@ -198,26 +422,172 @@ export function EditorShell() {
     void saveDiagram();
   }, [saveDiagram]);
 
+  const handleDeleteSelection = useCallback(() => {
+    const selectedNodeIds = new Set(
+      nodesRef.current.filter((node) => node.selected).map((node) => node.id)
+    );
+
+    const nextNodes =
+      selectedNodeIds.size > 0
+        ? nodesRef.current.filter((node) => !selectedNodeIds.has(node.id))
+        : nodesRef.current;
+
+    const nextEdges = edgesRef.current.filter(
+      (edge) =>
+        !edge.selected &&
+        !selectedNodeIds.has(edge.source) &&
+        !selectedNodeIds.has(edge.target)
+    );
+
+    if (
+      nextNodes.length === nodesRef.current.length &&
+      nextEdges.length === edgesRef.current.length
+    ) {
+      return;
+    }
+
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    pushHistorySnapshot({
+      nodes: nextNodes,
+      edges: nextEdges,
+    });
+  }, [pushHistorySnapshot, setEdges, setNodes]);
+
+  const handleClearSelection = useCallback(() => {
+    setNodes((currentNodes) =>
+      currentNodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+    );
+    setEdges((currentEdges) =>
+      currentEdges.map((edge) => (edge.selected ? { ...edge, selected: false } : edge))
+    );
+  }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const commandPressed = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+      const editable = isEditableTarget(event.target);
+
+      if (commandPressed && key === "z") {
+        if (editable) {
+          return;
+        }
+
+        event.preventDefault();
+
+        if (event.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+
+        return;
+      }
+
+      if (commandPressed && key === "y") {
+        if (editable) {
+          return;
+        }
+
+        event.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      if (editable) {
+        return;
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        handleDeleteSelection();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleClearSelection();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleClearSelection, handleDeleteSelection, handleRedo, handleUndo]);
+
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      setEdges((currentEdges) => {
+        const nextEdges = addEdge(
+          {
+            ...connection,
+            type: defaultEdgeType,
+            markerEnd: { type: MarkerType.ArrowClosed },
+          },
+          currentEdges
+        );
+
+        pushHistorySnapshot({ edges: nextEdges });
+
+        return nextEdges;
+      });
+    },
+    [defaultEdgeType, pushHistorySnapshot, setEdges]
+  );
+
   const handleCanvasPlaceNode = useCallback(
     (position: { x: number; y: number }) => {
       if (!isPlaceableNodeTool(activeTool)) {
         return;
       }
 
+      const nextPosition = snapEnabled ? snapPosition(position, gridSize) : position;
       const nodeRecord = createDefaultNodeRecord({
         id: createNodeId(),
         type: activeTool,
-        x: position.x,
-        y: position.y,
+        x: nextPosition.x,
+        y: nextPosition.y,
       });
 
-      setNodes((currentNodes) => [
-        ...currentNodes,
-        ...toFlowNodes([nodeRecord], handleNodeTextChange),
-      ]);
+      setNodes((currentNodes) => {
+        const nextNodes = [...currentNodes, ...toFlowNodes([nodeRecord], handleNodeTextChange)];
+
+        pushHistorySnapshot({ nodes: nextNodes });
+
+        return nextNodes;
+      });
       setActiveTool("select");
     },
-    [activeTool, handleNodeTextChange, setNodes]
+    [activeTool, gridSize, handleNodeTextChange, pushHistorySnapshot, setNodes, snapEnabled]
+  );
+
+  const handleNodeDragStart = useCallback(() => {
+    isDraggingNodeRef.current = true;
+  }, []);
+
+  const handleNodeDragStop = useCallback(
+    (node: Node<EditorNodeData>) => {
+      isDraggingNodeRef.current = false;
+
+      if (snapEnabledRef.current) {
+        setNodes((currentNodes) => {
+          const nextNodes = currentNodes.map((entry) =>
+            entry.id === node.id ? snapNodePosition(entry, gridSizeRef.current) : entry
+          );
+
+          pushHistorySnapshot({ nodes: nextNodes });
+
+          return nextNodes;
+        });
+        return;
+      }
+
+      pushHistorySnapshot();
+    },
+    [pushHistorySnapshot, setNodes]
   );
 
   const handleZoomIn = useCallback(() => {
@@ -258,21 +628,54 @@ export function EditorShell() {
                     <EditorCanvas
                       key={canvasMountKey}
                       nodes={nodes}
+                      edges={edges}
                       activeTool={activeTool}
-                      showGrid={showGrid}
+                      gridVisible={gridVisible}
+                      snapEnabled={snapEnabled}
+                      gridSize={gridSize}
+                      defaultEdgeType={defaultEdgeType}
                       initialViewport={canvasViewport}
                       onNodesChange={onNodesChange}
+                      onEdgesChange={onEdgesChange}
+                      onConnect={handleConnect}
                       onViewportChange={setViewport}
                       onCanvasPlaceNode={handleCanvasPlaceNode}
+                      onNodeDragStart={handleNodeDragStart}
+                      onNodeDragStop={handleNodeDragStop}
                       onReady={setFlowInstance}
                     />
                     <EditorBottomControls
                       zoom={viewport.zoom}
-                      gridEnabled={showGrid}
+                      canUndo={canUndo}
+                      canRedo={canRedo}
+                      gridVisible={gridVisible}
+                      snapEnabled={snapEnabled}
+                      defaultEdgeType={defaultEdgeType}
+                      onUndo={handleUndo}
+                      onRedo={handleRedo}
                       onZoomIn={handleZoomIn}
                       onZoomOut={handleZoomOut}
                       onFitView={handleFitView}
-                      onToggleGrid={() => setShowGrid((current) => !current)}
+                      onToggleGridVisible={() => setGridVisible((current) => !current)}
+                      onToggleSnap={() => {
+                        setSnapEnabled((current) => {
+                          const nextSnapEnabled = !current;
+
+                          pushHistorySnapshot({
+                            settings: {
+                              snapEnabled: nextSnapEnabled,
+                              gridSize: gridSizeRef.current,
+                            },
+                          });
+
+                          return nextSnapEnabled;
+                        });
+                      }}
+                      onToggleEdgeType={() =>
+                        setDefaultEdgeType((current) =>
+                          current === "smoothstep" ? "straight" : "smoothstep"
+                        )
+                      }
                     />
                   </>
                 )}

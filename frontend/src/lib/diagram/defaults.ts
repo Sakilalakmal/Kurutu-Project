@@ -1,5 +1,6 @@
 import type {
   DiagramDocument,
+  DiagramSettings,
   DiagramNodeRecord,
   DiagramNodeStyle,
   DiagramNodeType,
@@ -10,6 +11,13 @@ export const DEFAULT_VIEWPORT: DiagramViewport = {
   x: 0,
   y: 0,
   zoom: 1,
+};
+
+export const DEFAULT_GRID_SIZE = 10;
+
+export const DEFAULT_SETTINGS: DiagramSettings = {
+  snapEnabled: true,
+  gridSize: DEFAULT_GRID_SIZE,
 };
 
 const DEFAULT_NODE_STYLES: Record<DiagramNodeType, DiagramNodeStyle> = {
@@ -71,4 +79,5 @@ export const createEmptyDiagramDocument = (): DiagramDocument => ({
   nodes: [],
   edges: [],
   viewport: DEFAULT_VIEWPORT,
+  settings: { ...DEFAULT_SETTINGS },
 });

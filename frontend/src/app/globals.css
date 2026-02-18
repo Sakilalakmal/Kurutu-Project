@@ -125,3 +125,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+.react-flow__edge .react-flow__edge-path {
+  transition: stroke 180ms ease, stroke-width 180ms ease;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: rgb(37 99 235);
+  stroke-width: 2.5;
+}
+
+.react-flow__handle {
+  transition: background-color 180ms ease, transform 180ms ease;
+}

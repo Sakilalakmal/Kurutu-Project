@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Node, NodeProps, NodeTypes } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
 import type { EditorNodeData } from "@/lib/diagram/mapper";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +58,16 @@ function EditableShapeNode({
         setIsEditing(true);
       }}
     >
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-zinc-400 transition-colors duration-150"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-zinc-400 transition-colors duration-150"
+      />
       {shouldRenderStickyAccent ? (
         <span
           aria-hidden="true"

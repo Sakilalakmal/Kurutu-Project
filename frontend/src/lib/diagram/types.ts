@@ -52,11 +52,37 @@ export const diagramViewportSchema = z.object({
 
 export type DiagramViewport = z.infer<typeof diagramViewportSchema>;
 
+export const diagramEdgeTypeSchema = z.enum(["smoothstep", "straight"]);
+
+export type DiagramEdgeType = z.infer<typeof diagramEdgeTypeSchema>;
+
+export const diagramEdgeRecordSchema = z.object({
+  id: z.string().min(1),
+  source: z.string().min(1),
+  target: z.string().min(1),
+  sourceHandle: z.string().min(1).optional(),
+  targetHandle: z.string().min(1).optional(),
+  type: diagramEdgeTypeSchema.optional(),
+});
+
+export type DiagramEdgeRecord = z.infer<typeof diagramEdgeRecordSchema>;
+
+export const diagramSettingsSchema = z.object({
+  snapEnabled: z.boolean().default(true),
+  gridSize: z.number().int().positive().default(10),
+});
+
+export type DiagramSettings = z.infer<typeof diagramSettingsSchema>;
+
 export const diagramDocumentSchema = z.object({
   version: z.literal(1),
   nodes: z.array(diagramNodeRecordSchema),
-  edges: z.array(z.never()),
+  edges: z.array(diagramEdgeRecordSchema).optional().default([]),
   viewport: diagramViewportSchema,
+  settings: diagramSettingsSchema.optional().default({
+    snapEnabled: true,
+    gridSize: 10,
+  }),
 });
 
 export type DiagramDocument = z.infer<typeof diagramDocumentSchema>;
