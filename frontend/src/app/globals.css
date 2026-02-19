@@ -188,3 +188,144 @@
 .react-flow__handle {
   transition: background-color 180ms ease, transform 180ms ease;
 }
+
+.landing-page {
+  --landing-bg: #f5ede3;
+  --landing-card: #f9f4ec;
+  --landing-elevated: #fffaf3;
+  --landing-ink: #151b28;
+  --landing-muted: #465066;
+  --landing-line: #d8cfbf;
+  --landing-accent-coral: #f47249;
+  --landing-accent-teal: #5cb4a6;
+  --landing-accent-sun: #f6bf58;
+  color: var(--landing-ink);
+  background-color: var(--landing-bg);
+  background-image:
+    radial-gradient(circle at 12% 14%, rgb(245 186 130 / 18%), transparent 45%),
+    radial-gradient(circle at 82% 15%, rgb(116 188 177 / 18%), transparent 42%),
+    repeating-linear-gradient(0deg, rgb(21 27 40 / 4%) 0 1px, transparent 1px 82px),
+    repeating-linear-gradient(90deg, rgb(21 27 40 / 4%) 0 1px, transparent 1px 82px);
+}
+
+.landing-body {
+  font-family: var(--font-landing-sans), "DM Sans", "Segoe UI", sans-serif;
+}
+
+.landing-display {
+  font-family: var(--font-landing-serif), "Times New Roman", serif;
+}
+
+.landing-shell {
+  position: relative;
+}
+
+.landing-panel {
+  border: 1px solid var(--landing-line);
+  background: color-mix(in srgb, var(--landing-card) 90%, white 10%);
+  box-shadow: 0 26px 50px -42px rgb(17 24 39 / 65%);
+}
+
+.landing-kicker {
+  font-size: 0.71rem;
+  font-weight: 650;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--landing-muted);
+}
+
+.landing-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  background: var(--landing-ink);
+  color: var(--landing-bg);
+  border-radius: 999px;
+  font-size: 0.93rem;
+  font-weight: 650;
+  padding: 0.68rem 1.1rem;
+  transition: transform 220ms ease, box-shadow 220ms ease, background-color 220ms ease;
+}
+
+.landing-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 30px -22px rgb(21 27 40 / 80%);
+  background: #212a3f;
+}
+
+.landing-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--landing-line);
+  background: color-mix(in srgb, var(--landing-elevated) 85%, white 15%);
+  color: var(--landing-ink);
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.62rem 1rem;
+  transition: transform 180ms ease, background-color 180ms ease;
+}
+
+.landing-btn-secondary:hover {
+  transform: translateY(-1px);
+  background: var(--landing-elevated);
+}
+
+.landing-hero-stage {
+  border: 1px solid var(--landing-line);
+  background:
+    radial-gradient(circle at 18% 16%, rgb(244 126 87 / 14%), transparent 40%),
+    radial-gradient(circle at 84% 72%, rgb(92 180 166 / 17%), transparent 40%),
+    color-mix(in srgb, var(--landing-elevated) 88%, white 12%);
+}
+
+.landing-feature-card,
+.landing-step-card,
+.landing-template-card,
+.landing-output-card,
+.landing-cta-panel {
+  border: 1px solid var(--landing-line);
+  background: color-mix(in srgb, var(--landing-elevated) 92%, white 8%);
+}
+
+.landing-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid var(--landing-line);
+  background: var(--landing-bg);
+  padding: 0.18rem 0.65rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--landing-muted);
+}
+
+.landing-float {
+  animation: landing-float 12s ease-in-out infinite;
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(0.8deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-float {
+    animation: none;
+  }
+
+  .landing-btn-primary,
+  .landing-btn-secondary {
+    transition: none;
+  }
+}
