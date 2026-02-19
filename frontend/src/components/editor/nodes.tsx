@@ -1,38 +1,57 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
 import type { EditorNodeData } from "@/lib/diagram/mapper";
 import { cn } from "@/lib/utils";
 
-type ShapeKind = "rectangle" | "ellipse" | "sticky";
+type ShapeKind =
+  | "rectangle"
+  | "ellipse"
+  | "sticky"
+  | "wireframeButton"
+  | "wireframeInput"
+  | "wireframeCard"
+  | "wireframeAvatar"
+  | "wireframeNavbar"
+  | "wireframeSidebar"
+  | "wireframeModal";
 
 const shapeClassMap: Record<ShapeKind, string> = {
   rectangle: "rounded-xl",
   ellipse: "rounded-full",
   sticky: "rounded-2xl shadow-[0_10px_28px_-18px_rgba(120,113,108,0.7)]",
+  wireframeButton: "rounded-lg",
+  wireframeInput: "rounded-lg",
+  wireframeCard: "rounded-xl",
+  wireframeAvatar: "rounded-full",
+  wireframeNavbar: "rounded-xl",
+  wireframeSidebar: "rounded-xl",
+  wireframeModal: "rounded-2xl shadow-[0_18px_40px_-28px_rgba(71,85,105,0.7)]",
 };
 
 type EditorFlowNode = Node<EditorNodeData>;
 
-function EditableShapeNode({
+function EditableNodeFrame({
   id,
   data,
   selected,
   kind,
+  children,
 }: NodeProps<EditorFlowNode> & {
   kind: ShapeKind;
+  children: ReactNode;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draftText, setDraftText] = useState(data.text);
-
   const shouldRenderStickyAccent = kind === "sticky";
+  const isLocked = data.isLocked;
+  const isReadOnly = data.isReadOnly;
+
   const textColorClass = useMemo(
     () => (kind === "sticky" ? "font-medium text-[13px]" : "text-sm"),
     [kind]
   );
-  const isLocked = data.isLocked;
-  const isReadOnly = data.isReadOnly;
 
   const commitText = () => {
     const nextText = draftText.trim();
@@ -113,28 +132,135 @@ function EditableShapeNode({
           }}
         />
       ) : (
-        <p className={cn("pointer-events-none line-clamp-4 whitespace-pre-wrap", textColorClass)}>
-          {data.text}
-        </p>
+        <div className={cn("pointer-events-none w-full", textColorClass)}>{children}</div>
       )}
     </div>
   );
 }
 
 function RectangleNode(props: NodeProps<EditorFlowNode>) {
-  return <EditableShapeNode {...props} kind="rectangle" />;
+  return (
+    <EditableNodeFrame {...props} kind="rectangle">
+      <p className="line-clamp-4 whitespace-pre-wrap">{props.data.text}</p>
+    </EditableNodeFrame>
+  );
 }
 
 function EllipseNode(props: NodeProps<EditorFlowNode>) {
-  return <EditableShapeNode {...props} kind="ellipse" />;
+  return (
+    <EditableNodeFrame {...props} kind="ellipse">
+      <p className="line-clamp-4 whitespace-pre-wrap">{props.data.text}</p>
+    </EditableNodeFrame>
+  );
 }
 
 function StickyNode(props: NodeProps<EditorFlowNode>) {
-  return <EditableShapeNode {...props} kind="sticky" />;
+  return (
+    <EditableNodeFrame {...props} kind="sticky">
+      <p className="line-clamp-4 whitespace-pre-wrap">{props.data.text}</p>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeButtonNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeButton">
+      <p className="font-medium tracking-tight">{props.data.text}</p>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeInputNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeInput">
+      <div className="flex w-full items-center justify-between gap-2 rounded-md border border-black/10 bg-white/70 px-2.5 py-2 text-left">
+        <span className="truncate text-xs text-zinc-500">{props.data.text}</span>
+        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-zinc-300" />
+      </div>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeCardNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeCard">
+      <div className="w-full space-y-3 text-left">
+        <div className="h-6 w-2/3 rounded bg-zinc-100" />
+        <div className="space-y-1.5">
+          <div className="h-2 w-full rounded bg-zinc-100" />
+          <div className="h-2 w-4/5 rounded bg-zinc-100" />
+        </div>
+        <p className="truncate text-xs font-medium text-zinc-600">{props.data.text}</p>
+      </div>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeAvatarNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeAvatar">
+      <p className="text-xs font-semibold tracking-wide uppercase">{props.data.text}</p>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeNavbarNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeNavbar">
+      <div className="flex w-full items-center justify-between gap-2 text-left">
+        <div className="h-5 w-20 rounded bg-zinc-200/80" />
+        <div className="flex items-center gap-2">
+          <div className="h-3 w-10 rounded bg-zinc-200/80" />
+          <div className="h-3 w-10 rounded bg-zinc-200/80" />
+          <div className="h-3 w-10 rounded bg-zinc-200/80" />
+        </div>
+      </div>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeSidebarNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeSidebar">
+      <div className="w-full space-y-3 text-left">
+        <div className="h-5 w-3/4 rounded bg-zinc-200/80" />
+        <div className="h-3 w-full rounded bg-zinc-100" />
+        <div className="h-3 w-11/12 rounded bg-zinc-100" />
+        <div className="h-3 w-10/12 rounded bg-zinc-100" />
+        <div className="h-3 w-9/12 rounded bg-zinc-100" />
+      </div>
+    </EditableNodeFrame>
+  );
+}
+
+function WireframeModalNode(props: NodeProps<EditorFlowNode>) {
+  return (
+    <EditableNodeFrame {...props} kind="wireframeModal">
+      <div className="w-full space-y-3 text-left">
+        <div className="h-4 w-2/3 rounded bg-zinc-200/80" />
+        <div className="space-y-1.5">
+          <div className="h-2 w-full rounded bg-zinc-100" />
+          <div className="h-2 w-5/6 rounded bg-zinc-100" />
+          <div className="h-2 w-4/6 rounded bg-zinc-100" />
+        </div>
+        <div className="flex justify-end gap-2">
+          <div className="h-6 w-16 rounded bg-zinc-200/80" />
+          <div className="h-6 w-16 rounded bg-zinc-300/80" />
+        </div>
+      </div>
+    </EditableNodeFrame>
+  );
 }
 
 export const editorNodeTypes: NodeTypes = {
   rectangle: RectangleNode,
   ellipse: EllipseNode,
   sticky: StickyNode,
+  wireframeButton: WireframeButtonNode,
+  wireframeInput: WireframeInputNode,
+  wireframeCard: WireframeCardNode,
+  wireframeAvatar: WireframeAvatarNode,
+  wireframeNavbar: WireframeNavbarNode,
+  wireframeSidebar: WireframeSidebarNode,
+  wireframeModal: WireframeModalNode,
 };

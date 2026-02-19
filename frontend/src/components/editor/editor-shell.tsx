@@ -15,6 +15,7 @@ import { Toaster, toast } from "sonner";
 import { EditorBottomControls } from "@/components/editor/editor-bottom-controls";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
+import { TemplatesDialog } from "@/components/editor/TemplatesDialog";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
 import {
   EditorTopbar,
@@ -30,6 +31,9 @@ import {
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getAssetById } from "@/lib/assets/catalog";
+import { applyTemplate, createNodeFromAsset } from "@/lib/assets/builders";
+import { getTemplateById, TEMPLATE_LIBRARY } from "@/lib/assets/templates";
 import {
   DiagramApiError,
   fetchDiagramById,
@@ -96,6 +100,25 @@ const sanitizeFileName = (value: string) =>
 const isPlaceableNodeTool = (tool: EditorTool): tool is DiagramNodeType =>
   tool === "rectangle" || tool === "ellipse" || tool === "sticky";
 
+const resolveUniquePageName = (baseName: string, pages: DiagramPage[]) => {
+  const normalized = baseName.trim().length > 0 ? baseName.trim() : "Template";
+  const existing = new Set(pages.map((page) => page.name.toLowerCase()));
+
+  if (!existing.has(normalized.toLowerCase())) {
+    return normalized;
+  }
+
+  let suffix = 2;
+  let candidate = `${normalized} ${suffix}`;
+
+  while (existing.has(candidate.toLowerCase())) {
+    suffix += 1;
+    candidate = `${normalized} ${suffix}`;
+  }
+
+  return candidate;
+};
+
 const isEditableTarget = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -135,6 +158,7 @@ export function EditorShell({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [exportBackground, setExportBackground] =
     useState<ExportBackground>("transparent");
   const [isExportingPng, setIsExportingPng] = useState(false);
@@ -161,6 +185,8 @@ export function EditorShell({
   const changeVersionRef = useRef(0);
   const emptyDocumentRef = useRef(createEmptyDiagramDocument());
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTemplateFitRef = useRef(false);
+  const canvasContainerRef = useRef<HTMLDivElement | null>(null);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -207,6 +233,18 @@ export function EditorShell({
   useEffect(() => {
     activeLayerIdRef.current = activeLayerId;
   }, [activeLayerId]);
+
+  useEffect(() => {
+    if (!pendingTemplateFitRef.current || !flowInstance) {
+      return;
+    }
+
+    pendingTemplateFitRef.current = false;
+
+    requestAnimationFrame(() => {
+      void flowInstance.fitView({ duration: 220, padding: 0.2 });
+    });
+  }, [activePageId, flowInstance]);
 
   const showLayerLockedToast = useCallback(() => {
     toast("Layer is locked");
@@ -1117,6 +1155,41 @@ export function EditorShell({
     syncHistoryAvailability(page.id);
   }, [commitCurrentRuntimeToPages, createPageSnapshot, hydratePage, syncHistoryAvailability]);
 
+  const handleApplyTemplate = useCallback(
+    (templateId: string) => {
+      const template = getTemplateById(templateId);
+
+      if (!template) {
+        return;
+      }
+
+      const committedPages = commitCurrentRuntimeToPages(pagesRef.current);
+      const page = applyTemplate(template, {
+        pageName: resolveUniquePageName(template.name, committedPages),
+        settings: {
+          snapEnabled: snapEnabledRef.current,
+          gridSize: gridSizeRef.current,
+        },
+        viewport: { ...DEFAULT_VIEWPORT },
+      });
+      const nextPages = [...committedPages, page];
+
+      setPages(nextPages);
+      setActivePageId(page.id);
+      activePageIdRef.current = page.id;
+      setActiveTool("select");
+      hydratePage(page);
+      setFlowInstance(null);
+      setCanvasMountKey((previous) => previous + 1);
+      setIsTemplatesOpen(false);
+      pendingTemplateFitRef.current = true;
+
+      historiesRef.current[page.id] = createHistory(createPageSnapshot(page));
+      syncHistoryAvailability(page.id);
+    },
+    [commitCurrentRuntimeToPages, createPageSnapshot, hydratePage, syncHistoryAvailability]
+  );
+
   const handleConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) {
@@ -1160,18 +1233,89 @@ export function EditorShell({
     [defaultEdgeType, pushHistorySnapshot, setEdges, showLayerLockedToast]
   );
 
+  const resolveInsertionLayer = useCallback(() => {
+    const normalizedLayers = ensureLayerSet(layersRef.current);
+    const fallbackLayerId = normalizedLayers[0].id;
+    const targetLayerId = resolveActiveLayerId(
+      normalizedLayers,
+      activeLayerIdRef.current ?? fallbackLayerId
+    );
+
+    return { normalizedLayers, targetLayerId };
+  }, []);
+
+  const insertAssetAtPosition = useCallback(
+    (assetId: string, position: { x: number; y: number }) => {
+      const asset = getAssetById(assetId);
+
+      if (!asset) {
+        return;
+      }
+
+      const { normalizedLayers, targetLayerId } = resolveInsertionLayer();
+
+      if (isLayerLocked(normalizedLayers, targetLayerId)) {
+        showLayerLockedToast();
+        return;
+      }
+
+      const nextPosition = snapEnabledRef.current
+        ? snapPosition(position, gridSizeRef.current)
+        : position;
+      const nodeRecord = createNodeFromAsset(asset, nextPosition, targetLayerId);
+
+      setNodes((currentNodes) => {
+        const nextNodes = [
+          ...currentNodes,
+          ...toFlowNodes([nodeRecord], handleNodeTextChange, showLayerLockedToast),
+        ];
+
+        pushHistorySnapshot({ nodes: nextNodes });
+
+        return nextNodes;
+      });
+      setActiveTool("select");
+    },
+    [
+      handleNodeTextChange,
+      pushHistorySnapshot,
+      resolveInsertionLayer,
+      setNodes,
+      showLayerLockedToast,
+    ]
+  );
+
+  const handleInsertAssetAtCenter = useCallback(
+    (assetId: string) => {
+      if (!flowInstance || !canvasContainerRef.current) {
+        return;
+      }
+
+      const bounds = canvasContainerRef.current.getBoundingClientRect();
+      const flowPosition = flowInstance.screenToFlowPosition({
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2,
+      });
+
+      insertAssetAtPosition(assetId, flowPosition);
+    },
+    [flowInstance, insertAssetAtPosition]
+  );
+
+  const handleAssetDrop = useCallback(
+    (assetId: string, position: { x: number; y: number }) => {
+      insertAssetAtPosition(assetId, position);
+    },
+    [insertAssetAtPosition]
+  );
+
   const handleCanvasPlaceNode = useCallback(
     (position: { x: number; y: number }) => {
       if (!isPlaceableNodeTool(activeTool)) {
         return;
       }
 
-      const normalizedLayers = ensureLayerSet(layersRef.current);
-      const fallbackLayerId = normalizedLayers[0].id;
-      const targetLayerId = resolveActiveLayerId(
-        normalizedLayers,
-        activeLayerIdRef.current ?? fallbackLayerId
-      );
+      const { normalizedLayers, targetLayerId } = resolveInsertionLayer();
 
       if (isLayerLocked(normalizedLayers, targetLayerId)) {
         showLayerLockedToast();
@@ -1204,6 +1348,7 @@ export function EditorShell({
       gridSize,
       handleNodeTextChange,
       pushHistorySnapshot,
+      resolveInsertionLayer,
       setNodes,
       showLayerLockedToast,
       snapEnabled,
@@ -1331,6 +1476,7 @@ export function EditorShell({
               onAddPage={handleAddPage}
               isPageDisabled={isLoading}
               onOpenMobileChat={() => setIsMobileChatOpen(true)}
+              onOpenTemplates={() => setIsTemplatesOpen(true)}
               onExportPng={handleExportPng}
               onExportSvg={handleExportSvg}
               exportBackground={exportBackground}
@@ -1345,8 +1491,12 @@ export function EditorShell({
               isCopyShareSuccess={isCopyShareSuccess}
             />
             <div className="flex min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-5">
-              <EditorToolbar activeTool={activeTool} onToolSelect={setActiveTool} />
-              <div className="relative min-w-0 flex-1">
+              <EditorToolbar
+                activeTool={activeTool}
+                onToolSelect={setActiveTool}
+                onAssetInsert={handleInsertAssetAtCenter}
+              />
+              <div ref={canvasContainerRef} className="relative min-w-0 flex-1">
                 {isLoading ? (
                   <div className="flex h-full w-full items-center justify-center rounded-2xl border border-zinc-200 bg-white">
                     <Spinner className="size-5 text-zinc-500" />
@@ -1368,6 +1518,7 @@ export function EditorShell({
                       onConnect={handleConnect}
                       onViewportChange={setViewport}
                       onCanvasPlaceNode={handleCanvasPlaceNode}
+                      onAssetDrop={handleAssetDrop}
                       onNodeDragStart={handleNodeDragStart}
                       onNodeDragStop={handleNodeDragStop}
                       onReady={setFlowInstance}
@@ -1445,6 +1596,13 @@ export function EditorShell({
           <EditorChatPanel className="h-[calc(100vh-7rem)]" />
         </SheetContent>
       </Sheet>
+      <TemplatesDialog
+        open={isTemplatesOpen}
+        onOpenChange={setIsTemplatesOpen}
+        templates={TEMPLATE_LIBRARY}
+        onUseTemplate={handleApplyTemplate}
+        disabled={isLoading}
+      />
       <Toaster position="top-right" />
     </>
   );

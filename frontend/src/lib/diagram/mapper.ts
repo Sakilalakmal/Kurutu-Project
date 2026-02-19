@@ -30,7 +30,16 @@ export type EditorEdge = Edge & {
 };
 
 const isDiagramNodeType = (value: string): value is DiagramNodeType =>
-  value === "rectangle" || value === "ellipse" || value === "sticky";
+  value === "rectangle" ||
+  value === "ellipse" ||
+  value === "sticky" ||
+  value === "wireframeButton" ||
+  value === "wireframeInput" ||
+  value === "wireframeCard" ||
+  value === "wireframeAvatar" ||
+  value === "wireframeNavbar" ||
+  value === "wireframeSidebar" ||
+  value === "wireframeModal";
 
 const isDiagramEdgeType = (value: string | undefined): value is DiagramEdgeType =>
   value === "smoothstep" || value === "straight";

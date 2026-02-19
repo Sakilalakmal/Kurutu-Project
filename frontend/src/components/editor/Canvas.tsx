@@ -1,6 +1,11 @@
 "use client";
 
-import { useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useMemo,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   Background,
   BackgroundVariant,
@@ -16,6 +21,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { editorNodeTypes } from "@/components/editor/nodes";
+import { ASSET_DRAG_MIME } from "@/lib/assets/catalog";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
 import type { DiagramEdgeType, DiagramViewport, EditorTool } from "@/lib/diagram/types";
 
@@ -34,6 +40,7 @@ type EditorCanvasProps = {
   onConnect: (connection: Connection) => void;
   onViewportChange: (viewport: DiagramViewport) => void;
   onCanvasPlaceNode: (position: { x: number; y: number }) => void;
+  onAssetDrop?: (assetId: string, position: { x: number; y: number }) => void;
   onReady?: (instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>) => void;
   onNodeDragStart?: () => void;
   onNodeDragStop?: (node: Node<EditorNodeData>) => void;
@@ -55,6 +62,7 @@ function EditorCanvasInner({
   onConnect,
   onViewportChange,
   onCanvasPlaceNode,
+  onAssetDrop,
   onReady,
   onNodeDragStart,
   onNodeDragStop,
@@ -95,6 +103,40 @@ function EditorCanvasInner({
     onCanvasPlaceNode(position);
   };
 
+  const handleDragOver = (event: ReactDragEvent) => {
+    if (!onAssetDrop || readOnly) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDrop = (
+    event: ReactDragEvent,
+    instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>
+  ) => {
+    if (!onAssetDrop || readOnly) {
+      return;
+    }
+
+    event.preventDefault();
+    const assetId =
+      event.dataTransfer.getData(ASSET_DRAG_MIME) ||
+      event.dataTransfer.getData("text/plain");
+
+    if (!assetId) {
+      return;
+    }
+
+    const position = instance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+
+    onAssetDrop(assetId, position);
+  };
+
   return (
     <div className="h-full w-full overflow-hidden rounded-2xl border border-zinc-200 bg-[#fafafa] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]">
       <ReactFlow
@@ -114,6 +156,14 @@ function EditorCanvasInner({
           }
 
           handlePaneClick(event, flowInstance);
+        }}
+        onDragOver={handleDragOver}
+        onDrop={(event) => {
+          if (!flowInstance) {
+            return;
+          }
+
+          handleDrop(event, flowInstance);
         }}
         onInit={(instance) => {
           setFlowInstance(instance);

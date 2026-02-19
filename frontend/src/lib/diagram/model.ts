@@ -1,6 +1,17 @@
 import { z } from "zod";
 
-export const diagramNodeTypeSchema = z.enum(["rectangle", "ellipse", "sticky"]);
+export const diagramNodeTypeSchema = z.enum([
+  "rectangle",
+  "ellipse",
+  "sticky",
+  "wireframeButton",
+  "wireframeInput",
+  "wireframeCard",
+  "wireframeAvatar",
+  "wireframeNavbar",
+  "wireframeSidebar",
+  "wireframeModal",
+]);
 export type DiagramNodeType = z.infer<typeof diagramNodeTypeSchema>;
 
 export const diagramNodeStyleSchema = z.object({

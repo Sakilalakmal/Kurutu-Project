@@ -8,6 +8,7 @@ import {
   Save,
   Share2,
   Sparkles,
+  WandSparkles,
 } from "lucide-react";
 import { PageSwitcher } from "@/components/editor/PageSwitcher";
 import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
@@ -53,6 +54,7 @@ type EditorTopbarProps = {
   onAddPage: () => void;
   isPageDisabled?: boolean;
   onOpenMobileChat: () => void;
+  onOpenTemplates: () => void;
   onExportPng: () => void;
   onExportSvg: () => void;
   exportBackground: ExportBackground;
@@ -101,6 +103,7 @@ export function EditorTopbar({
   onAddPage,
   isPageDisabled,
   onOpenMobileChat,
+  onOpenTemplates,
   onExportPng,
   onExportSvg,
   exportBackground,
@@ -151,6 +154,23 @@ export function EditorTopbar({
         ) : null}
 
         <div className="ml-auto flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5"
+                onClick={onOpenTemplates}
+                aria-label="Open templates"
+                disabled={isPageDisabled}
+              >
+                <WandSparkles className="size-4" />
+                <span className="hidden md:inline">Templates</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Create a new page from template</TooltipContent>
+          </Tooltip>
+
           <ButtonGroup className="hidden overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] md:flex">
             <Tooltip>
               <TooltipTrigger asChild>

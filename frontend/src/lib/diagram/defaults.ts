@@ -41,18 +41,67 @@ const DEFAULT_NODE_STYLES: Record<DiagramNodeType, DiagramNodeStyle> = {
     stroke: "#fcd34d",
     textColor: "#1f2937",
   },
+  wireframeButton: {
+    fill: "#f8fafc",
+    stroke: "#cbd5e1",
+    textColor: "#0f172a",
+  },
+  wireframeInput: {
+    fill: "#ffffff",
+    stroke: "#d4d4d8",
+    textColor: "#3f3f46",
+  },
+  wireframeCard: {
+    fill: "#ffffff",
+    stroke: "#d4d4d8",
+    textColor: "#111827",
+  },
+  wireframeAvatar: {
+    fill: "#f4f4f5",
+    stroke: "#d4d4d8",
+    textColor: "#3f3f46",
+  },
+  wireframeNavbar: {
+    fill: "#fafafa",
+    stroke: "#d4d4d8",
+    textColor: "#18181b",
+  },
+  wireframeSidebar: {
+    fill: "#fafafa",
+    stroke: "#d4d4d8",
+    textColor: "#18181b",
+  },
+  wireframeModal: {
+    fill: "#ffffff",
+    stroke: "#d4d4d8",
+    textColor: "#18181b",
+  },
 };
 
 const DEFAULT_NODE_SIZES: Record<DiagramNodeType, { width: number; height: number }> = {
   rectangle: { width: 180, height: 92 },
   ellipse: { width: 180, height: 110 },
   sticky: { width: 190, height: 135 },
+  wireframeButton: { width: 144, height: 48 },
+  wireframeInput: { width: 220, height: 52 },
+  wireframeCard: { width: 280, height: 170 },
+  wireframeAvatar: { width: 72, height: 72 },
+  wireframeNavbar: { width: 420, height: 64 },
+  wireframeSidebar: { width: 210, height: 290 },
+  wireframeModal: { width: 320, height: 208 },
 };
 
 const DEFAULT_NODE_TEXT: Record<DiagramNodeType, string> = {
   rectangle: "Rectangle",
   ellipse: "Ellipse",
   sticky: "Sticky note",
+  wireframeButton: "Button",
+  wireframeInput: "Input",
+  wireframeCard: "Card",
+  wireframeAvatar: "AV",
+  wireframeNavbar: "Navigation",
+  wireframeSidebar: "Sidebar",
+  wireframeModal: "Modal",
 };
 
 export const getDefaultNodeStyle = (type: DiagramNodeType): DiagramNodeStyle =>
