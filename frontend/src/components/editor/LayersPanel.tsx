@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -27,6 +28,7 @@ type LayersPanelProps = {
   onToggleLock: (layerId: string) => void;
   onMoveLayer: (layerId: string, direction: "up" | "down") => void;
   onAddLayer: () => void;
+  headerAction?: ReactNode;
 };
 
 export function LayersPanel({
@@ -38,6 +40,7 @@ export function LayersPanel({
   onToggleLock,
   onMoveLayer,
   onAddLayer,
+  headerAction,
 }: LayersPanelProps) {
   const orderedLayers = [...layers].sort((a, b) => a.order - b.order);
 
@@ -48,15 +51,18 @@ export function LayersPanel({
           <Layers3 className="size-4" />
           Layers
         </h2>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 border-zinc-200 bg-white text-xs dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-          onClick={onAddLayer}
-        >
-          <Plus className="size-3.5" />
-          Add layer
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 border-cyan-700 bg-cyan-600 text-xs text-white shadow-[0_10px_20px_-14px_rgba(8,145,178,0.95)] hover:bg-cyan-500 active:bg-cyan-700 dark:border-cyan-300 dark:bg-cyan-400 dark:text-zinc-950 dark:hover:bg-cyan-300"
+            onClick={onAddLayer}
+          >
+            <Plus className="size-3.5" />
+            Add layer
+          </Button>
+          {headerAction}
+        </div>
       </div>
       <Separator />
       <ScrollArea className="mt-3 flex-1 pr-1">

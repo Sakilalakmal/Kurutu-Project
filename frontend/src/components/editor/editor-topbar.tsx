@@ -59,7 +59,7 @@ type EditorTopbarProps = {
   onPageChange: (pageId: string) => void;
   onAddPage: () => void;
   isPageDisabled?: boolean;
-  onOpenMobileChat: () => void;
+  onOpenChat: () => void;
   onOpenTemplates: () => void;
   onExportPng: () => void;
   onExportSvg: () => void;
@@ -112,7 +112,7 @@ export function EditorTopbar({
   onPageChange,
   onAddPage,
   isPageDisabled,
-  onOpenMobileChat,
+  onOpenChat,
   onOpenTemplates,
   onExportPng,
   onExportSvg,
@@ -333,7 +333,12 @@ export function EditorTopbar({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                    className={cn(
+                      "h-8 rounded-lg border border-emerald-700 bg-emerald-600 text-white shadow-[0_12px_28px_-18px_rgba(5,150,105,0.95)] transition-transform duration-200 hover:-translate-y-0.5 hover:bg-emerald-500 active:bg-emerald-700",
+                      "focus-visible:ring-2 focus-visible:ring-emerald-500",
+                      "dark:border-emerald-300 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300",
+                      !shareUrl && "opacity-60"
+                    )}
                     aria-label="Share diagram"
                     disabled={!shareUrl}
                   >
@@ -405,9 +410,10 @@ export function EditorTopbar({
             size="sm"
             variant="default"
             className={cn(
-              "h-8 rounded-lg border border-blue-700 bg-blue-600 text-white shadow-[0_12px_30px_-18px_rgba(37,99,235,0.9)]",
-              "hover:bg-blue-500 active:bg-blue-700",
-              "focus-visible:ring-2 focus-visible:ring-blue-500",
+              "h-8 rounded-lg border border-fuchsia-700 bg-fuchsia-600 text-white shadow-[0_12px_30px_-18px_rgba(192,38,211,0.95)]",
+              "hover:bg-fuchsia-500 active:bg-fuchsia-700",
+              "focus-visible:ring-2 focus-visible:ring-fuchsia-500",
+              "dark:border-fuchsia-300 dark:bg-fuchsia-400 dark:text-zinc-950 dark:hover:bg-fuchsia-300",
               saveStatus === "saving" && "cursor-not-allowed opacity-80"
             )}
             onClick={onSave}
@@ -419,13 +425,14 @@ export function EditorTopbar({
           </Button>
 
           <Button
-            size="icon-sm"
+            size="sm"
             variant="outline"
-            className="h-8 w-8 rounded-lg border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 lg:hidden"
+            className="h-8 rounded-lg border border-amber-700 bg-amber-500 text-zinc-950 shadow-[0_12px_26px_-18px_rgba(245,158,11,0.95)] transition-transform duration-200 hover:-translate-y-0.5 hover:bg-amber-400 active:bg-amber-600 focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-amber-300 dark:bg-amber-400 dark:text-zinc-950 dark:hover:bg-amber-300"
             aria-label="Open chat panel"
-            onClick={onOpenMobileChat}
+            onClick={onOpenChat}
           >
             <MessageSquare className="size-4" />
+            <span className="hidden sm:inline">Chat</span>
           </Button>
         </div>
       </header>

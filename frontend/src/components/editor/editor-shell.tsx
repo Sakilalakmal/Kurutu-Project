@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng, toSvg } from "html-to-image";
+import { ChevronLeft, ChevronRight, Layers3 } from "lucide-react";
 import {
   addEdge,
   type Connection,
@@ -28,9 +29,10 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Toaster } from "@/components/ui/sonner";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { getAssetById } from "@/lib/assets/catalog";
 import { applyTemplate, createNodeFromAsset } from "@/lib/assets/builders";
 import { getTemplateById, TEMPLATE_LIBRARY } from "@/lib/assets/templates";
@@ -93,6 +95,7 @@ const EXPORT_PADDING = 48;
 const PNG_EXPORT_SCALE = 3;
 const SMART_SNAP_THRESHOLD = 6;
 const POSITION_EPSILON = 0.001;
+const RIGHT_SIDEBAR_COLLAPSED_KEY = "kurutu:ui:rightSidebarCollapsed";
 
 const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -194,7 +197,9 @@ export function EditorShell({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [isChatSheetOpen, setIsChatSheetOpen] = useState(false);
+  const [isMobileLayersSheetOpen, setIsMobileLayersSheetOpen] = useState(false);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [exportBackground, setExportBackground] =
     useState<ExportBackground>("transparent");
@@ -228,6 +233,8 @@ export function EditorShell({
   const snapTargetsRef = useRef<SnapTargets | null>(null);
   const activeDragNodeIdRef = useRef<string | null>(null);
   const dragSmartEnabledRef = useRef(false);
+  const hasLoadedSidebarPreferenceRef = useRef(false);
+  const isMobile = useIsMobile();
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -240,6 +247,38 @@ export function EditorShell({
   const activePageIdRef = useRef(activePageId);
   const layersRef = useRef(layers);
   const activeLayerIdRef = useRef(activeLayerId);
+  const isLayersSidebarCollapsed = isMobile || rightSidebarCollapsed;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedPreference = window.localStorage.getItem(RIGHT_SIDEBAR_COLLAPSED_KEY);
+
+    if (storedPreference === "true" || storedPreference === "false") {
+      setRightSidebarCollapsed(storedPreference === "true");
+    } else {
+      setRightSidebarCollapsed(window.innerWidth < 1024);
+    }
+
+    hasLoadedSidebarPreferenceRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedSidebarPreferenceRef.current || typeof window === "undefined") {
+      return;
+    }
+
+    if (window.innerWidth < 1024) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      RIGHT_SIDEBAR_COLLAPSED_KEY,
+      String(rightSidebarCollapsed)
+    );
+  }, [rightSidebarCollapsed]);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -1706,6 +1745,23 @@ export function EditorShell({
     setLayers((currentLayers) => reorderLayers(currentLayers, layerId, direction));
   }, []);
 
+  const handleOpenLayersPanel = useCallback(() => {
+    if (isMobile) {
+      setIsMobileLayersSheetOpen(true);
+      return;
+    }
+
+    setRightSidebarCollapsed(false);
+  }, [isMobile]);
+
+  const handleCollapseLayersPanel = useCallback(() => {
+    if (isMobile) {
+      return;
+    }
+
+    setRightSidebarCollapsed(true);
+  }, [isMobile]);
+
   return (
     <>
       <main className="h-dvh w-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(191,219,254,0.45),rgba(241,245,249,0.96)_60%)] dark:bg-[radial-gradient(circle_at_top,rgba(46,58,80,0.55),rgba(15,23,42,0.98)_60%)]">
@@ -1723,7 +1779,7 @@ export function EditorShell({
               onPageChange={handlePageSwitch}
               onAddPage={handleAddPage}
               isPageDisabled={isLoading}
-              onOpenMobileChat={() => setIsMobileChatOpen(true)}
+              onOpenChat={() => setIsChatSheetOpen(true)}
               onOpenTemplates={() => setIsTemplatesOpen(true)}
               onExportPng={handleExportPng}
               onExportSvg={handleExportSvg}
@@ -1817,16 +1873,36 @@ export function EditorShell({
                   </>
                 )}
               </div>
-              <aside className="hidden w-[320px] shrink-0 lg:block">
-                <Tabs defaultValue="chat" className="h-full">
-                  <TabsList className="grid w-full grid-cols-2 bg-zinc-100 dark:bg-zinc-900">
-                    <TabsTrigger value="chat">Chat</TabsTrigger>
-                    <TabsTrigger value="layers">Layers</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="chat" className="h-[calc(100%-2.5rem)]">
-                    <EditorChatPanel className="h-full" />
-                  </TabsContent>
-                  <TabsContent value="layers" className="h-[calc(100%-2.5rem)]">
+              <aside
+                className={`shrink-0 transition-[width] duration-200 ease-out ${
+                  isLayersSidebarCollapsed ? "w-[56px]" : "w-[320px]"
+                }`}
+              >
+                {isLayersSidebarCollapsed ? (
+                  <div className="flex h-full flex-col items-center gap-2 rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.75)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
+                    <Button
+                      size="icon-sm"
+                      variant="outline"
+                      className="h-9 w-9 rounded-xl border-indigo-700 bg-indigo-600 text-white shadow-[0_12px_22px_-14px_rgba(79,70,229,0.95)] hover:bg-indigo-500 active:bg-indigo-700 dark:border-indigo-300 dark:bg-indigo-400 dark:text-zinc-950 dark:hover:bg-indigo-300"
+                      onClick={handleOpenLayersPanel}
+                      aria-label="Open layers panel"
+                      title="Layers"
+                    >
+                      <Layers3 className="size-4" />
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="h-9 w-9 rounded-xl"
+                      onClick={handleOpenLayersPanel}
+                      aria-label="Expand layers sidebar"
+                      title="Expand sidebar"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="h-full">
                     <LayersPanel
                       layers={layers}
                       activeLayerId={activeLayerId}
@@ -1836,19 +1912,53 @@ export function EditorShell({
                       onToggleLock={handleToggleLayerLock}
                       onMoveLayer={handleMoveLayer}
                       onAddLayer={handleAddLayer}
+                      headerAction={
+                        <Button
+                          size="icon-sm"
+                          variant="outline"
+                          className="h-7 w-7 rounded-md border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+                          onClick={handleCollapseLayersPanel}
+                          aria-label="Collapse layers sidebar"
+                          title="Collapse sidebar"
+                        >
+                          <ChevronRight className="size-3.5" />
+                        </Button>
+                      }
                     />
-                  </TabsContent>
-                </Tabs>
+                  </div>
+                )}
               </aside>
             </div>
           </section>
         </div>
       </main>
 
-      <Sheet open={isMobileChatOpen} onOpenChange={setIsMobileChatOpen}>
+      <Sheet open={isMobileLayersSheetOpen} onOpenChange={setIsMobileLayersSheetOpen}>
         <SheetContent
           side="right"
-          className="w-[92vw] max-w-sm border-zinc-200 bg-[#edf1f4] p-3 dark:border-zinc-800 dark:bg-[#0f1724]"
+          className="w-full border-zinc-200 bg-[#edf1f4] p-3 dark:border-zinc-800 dark:bg-[#0f1724] sm:max-w-[360px]"
+        >
+          <SheetHeader className="px-1 pb-2">
+            <SheetTitle>Layers</SheetTitle>
+          </SheetHeader>
+          <div className="h-[calc(100vh-7rem)]">
+            <LayersPanel
+              layers={layers}
+              activeLayerId={activeLayerId}
+              onSelectLayer={handleSelectLayer}
+              onRenameLayer={handleRenameLayer}
+              onToggleVisibility={handleToggleLayerVisibility}
+              onToggleLock={handleToggleLayerLock}
+              onMoveLayer={handleMoveLayer}
+              onAddLayer={handleAddLayer}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <Sheet open={isChatSheetOpen} onOpenChange={setIsChatSheetOpen}>
+        <SheetContent
+          side="right"
+          className="w-full border-zinc-200 bg-[#edf1f4] p-3 dark:border-zinc-800 dark:bg-[#0f1724] sm:max-w-[360px]"
         >
           <SheetHeader className="px-1 pb-2">
             <SheetTitle>Chat</SheetTitle>
