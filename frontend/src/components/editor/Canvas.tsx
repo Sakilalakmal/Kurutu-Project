@@ -21,8 +21,10 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { editorNodeTypes } from "@/components/editor/nodes";
+import { SnapGuidesOverlay } from "@/components/editor/SnapGuidesOverlay";
 import { ASSET_DRAG_MIME } from "@/lib/assets/catalog";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
+import type { SnapGuides } from "@/lib/diagram/smartSnap";
 import type { DiagramEdgeType, DiagramViewport, EditorTool } from "@/lib/diagram/types";
 
 type EditorCanvasProps = {
@@ -33,6 +35,7 @@ type EditorCanvasProps = {
   gridVisible: boolean;
   snapEnabled: boolean;
   gridSize: number;
+  snapGuides?: SnapGuides | null;
   defaultEdgeType: DiagramEdgeType;
   initialViewport: DiagramViewport;
   onNodesChange: OnNodesChange<Node<EditorNodeData>>;
@@ -42,8 +45,15 @@ type EditorCanvasProps = {
   onCanvasPlaceNode: (position: { x: number; y: number }) => void;
   onAssetDrop?: (assetId: string, position: { x: number; y: number }) => void;
   onReady?: (instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>) => void;
-  onNodeDragStart?: () => void;
-  onNodeDragStop?: (node: Node<EditorNodeData>) => void;
+  onNodeDragStart?: (
+    node: Node<EditorNodeData>,
+    draggingNodes: Node<EditorNodeData>[]
+  ) => void;
+  onNodeDrag?: (node: Node<EditorNodeData>, draggingNodes: Node<EditorNodeData>[]) => void;
+  onNodeDragStop?: (
+    node: Node<EditorNodeData>,
+    draggingNodes: Node<EditorNodeData>[]
+  ) => void;
   onLockedNodeInteraction: () => void;
 };
 
@@ -55,6 +65,7 @@ function EditorCanvasInner({
   gridVisible,
   snapEnabled,
   gridSize,
+  snapGuides,
   defaultEdgeType,
   initialViewport,
   onNodesChange,
@@ -65,6 +76,7 @@ function EditorCanvasInner({
   onAssetDrop,
   onReady,
   onNodeDragStart,
+  onNodeDrag,
   onNodeDragStop,
   onLockedNodeInteraction,
 }: EditorCanvasProps) {
@@ -169,8 +181,9 @@ function EditorCanvasInner({
           setFlowInstance(instance);
           onReady?.(instance);
         }}
-        onNodeDragStart={() => onNodeDragStart?.()}
-        onNodeDragStop={(_, node) => onNodeDragStop?.(node)}
+        onNodeDragStart={(_, node, draggingNodes) => onNodeDragStart?.(node, draggingNodes)}
+        onNodeDrag={(_, node, draggingNodes) => onNodeDrag?.(node, draggingNodes)}
+        onNodeDragStop={(_, node, draggingNodes) => onNodeDragStop?.(node, draggingNodes)}
         onNodeClick={(_, node) => {
           if (node.data?.isLocked) {
             onLockedNodeInteraction();
@@ -200,6 +213,7 @@ function EditorCanvasInner({
             color="rgba(148,163,184,0.45)"
           />
         ) : null}
+        <SnapGuidesOverlay guides={snapGuides} />
       </ReactFlow>
     </div>
   );
