@@ -36,6 +36,7 @@ type EditorCanvasProps = {
   onReady: (instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>) => void;
   onNodeDragStart: () => void;
   onNodeDragStop: (node: Node<EditorNodeData>) => void;
+  onLockedNodeInteraction: () => void;
 };
 
 function EditorCanvasInner({
@@ -55,6 +56,7 @@ function EditorCanvasInner({
   onReady,
   onNodeDragStart,
   onNodeDragStop,
+  onLockedNodeInteraction,
 }: EditorCanvasProps) {
   const interactiveSelection = activeTool === "select";
   const [flowInstance, setFlowInstance] = useState<
@@ -117,6 +119,11 @@ function EditorCanvasInner({
         }}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={(_, node) => onNodeDragStop(node)}
+        onNodeClick={(_, node) => {
+          if (node.data?.isLocked) {
+            onLockedNodeInteraction();
+          }
+        }}
         nodesDraggable={interactiveSelection}
         nodesConnectable={interactiveSelection}
         elementsSelectable={interactiveSelection}

@@ -6,6 +6,7 @@ import {
   addEdge,
   type Connection,
   type Node,
+  type NodeChange,
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { useEdgesState, useNodesState } from "@xyflow/react";
@@ -15,6 +16,7 @@ import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
 import { EditorTopbar, type SaveStatus } from "@/components/editor/editor-topbar";
+import { LayersPanel } from "@/components/editor/LayersPanel";
 import {
   Sheet,
   SheetContent,
@@ -22,26 +24,42 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fetchLatestDiagram, updateDiagram } from "@/lib/diagram/api";
 import {
   createDefaultNodeRecord,
   DEFAULT_GRID_SIZE,
   DEFAULT_SETTINGS,
   DEFAULT_VIEWPORT,
+  createEmptyDiagramDocument,
 } from "@/lib/diagram/defaults";
 import { createHistory, type DiagramSnapshot } from "@/lib/diagram/history";
 import {
-  toDiagramDocument,
+  createDefaultLayer,
+  createDefaultPage,
+  ensureLayerSet,
+  ensurePageLayerRefs,
+  isLayerLocked,
+  nextPageName,
+  reorderLayers,
+  resolveActiveLayerId,
+  sortLayers,
+  upsertPage,
+} from "@/lib/diagram/layers";
+import {
+  toDiagramPageRecords,
   toFlowEdges,
   toFlowNodes,
   type EditorEdge,
   type EditorNodeData,
 } from "@/lib/diagram/mapper";
+import { migrateDiagramData } from "@/lib/diagram/migrate";
 import { snapNodePosition, snapPosition } from "@/lib/diagram/snap";
 import type {
   DiagramEdgeType,
+  DiagramLayer,
   DiagramNodeType,
-  DiagramSettings,
+  DiagramPage,
   DiagramViewport,
   EditorTool,
 } from "@/lib/diagram/types";
@@ -52,6 +70,8 @@ const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const createLayerName = (count: number) => `Layer ${count + 1}`;
 
 const isPlaceableNodeTool = (tool: EditorTool): tool is DiagramNodeType =>
   tool === "rectangle" || tool === "ellipse" || tool === "sticky";
@@ -74,6 +94,10 @@ const isEditableTarget = (target: EventTarget | null) => {
 export function EditorShell() {
   const [diagramId, setDiagramId] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled Diagram");
+  const [pages, setPages] = useState<DiagramPage[]>([]);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
+  const [layers, setLayers] = useState<DiagramLayer[]>([]);
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<DiagramViewport>(DEFAULT_VIEWPORT);
   const [canvasViewport, setCanvasViewport] = useState<DiagramViewport>(DEFAULT_VIEWPORT);
   const [canvasMountKey, setCanvasMountKey] = useState(0);
@@ -92,24 +116,29 @@ export function EditorShell() {
     ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<EditorNodeData>>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<EditorEdge>([]);
+  const [nodes, setNodes, rawOnNodesChange] = useNodesState<Node<EditorNodeData>>([]);
+  const [edges, setEdges, rawOnEdgesChange] = useEdgesState<EditorEdge>([]);
 
   const hasHydratedRef = useRef(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const historyRef = useRef<ReturnType<typeof createHistory> | null>(null);
+  const historiesRef = useRef<Record<string, ReturnType<typeof createHistory>>>({});
   const isDraggingNodeRef = useRef(false);
   const isRestoringHistoryRef = useRef(false);
   const currentSignatureRef = useRef("");
   const lastSavedSignatureRef = useRef<string>("");
   const previousSignatureRef = useRef<string>("");
   const changeVersionRef = useRef(0);
+  const emptyDocumentRef = useRef(createEmptyDiagramDocument());
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const viewportRef = useRef(viewport);
   const snapEnabledRef = useRef(snapEnabled);
   const gridSizeRef = useRef(gridSize);
+  const pagesRef = useRef(pages);
+  const activePageIdRef = useRef(activePageId);
+  const layersRef = useRef(layers);
+  const activeLayerIdRef = useRef(activeLayerId);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -131,10 +160,44 @@ export function EditorShell() {
     gridSizeRef.current = gridSize;
   }, [gridSize]);
 
-  const syncHistoryAvailability = useCallback(() => {
-    setCanUndo(historyRef.current?.canUndo() ?? false);
-    setCanRedo(historyRef.current?.canRedo() ?? false);
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+
+  useEffect(() => {
+    activePageIdRef.current = activePageId;
+  }, [activePageId]);
+
+  useEffect(() => {
+    layersRef.current = layers;
+  }, [layers]);
+
+  useEffect(() => {
+    activeLayerIdRef.current = activeLayerId;
+  }, [activeLayerId]);
+
+  const showLayerLockedToast = useCallback(() => {
+    toast("Layer is locked");
   }, []);
+
+  const getActiveHistory = useCallback((pageId?: string) => {
+    const targetPageId = pageId ?? activePageIdRef.current;
+
+    if (!targetPageId) {
+      return null;
+    }
+
+    return historiesRef.current[targetPageId] ?? null;
+  }, []);
+
+  const syncHistoryAvailability = useCallback(
+    (pageId?: string) => {
+      const history = getActiveHistory(pageId);
+      setCanUndo(history?.canUndo() ?? false);
+      setCanRedo(history?.canRedo() ?? false);
+    },
+    [getActiveHistory]
+  );
 
   const buildSnapshot = useCallback(
     (overrides?: Partial<DiagramSnapshot>): DiagramSnapshot => ({
@@ -152,14 +215,72 @@ export function EditorShell() {
 
   const pushHistorySnapshot = useCallback(
     (overrides?: Partial<DiagramSnapshot>) => {
-      if (!hasHydratedRef.current || isRestoringHistoryRef.current || !historyRef.current) {
+      if (!hasHydratedRef.current || isRestoringHistoryRef.current) {
         return;
       }
 
-      historyRef.current.push(buildSnapshot(overrides));
+      const history = getActiveHistory();
+
+      if (!history) {
+        return;
+      }
+
+      history.push(buildSnapshot(overrides));
       syncHistoryAvailability();
     },
-    [buildSnapshot, syncHistoryAvailability]
+    [buildSnapshot, getActiveHistory, syncHistoryAvailability]
+  );
+
+  const handleNodeTextChange = useCallback(
+    (nodeId: string, nextText: string) => {
+      const targetNode = nodesRef.current.find((node) => node.id === nodeId);
+
+      if (!targetNode) {
+        return;
+      }
+
+      if (isLayerLocked(layersRef.current, targetNode.data.layerId)) {
+        showLayerLockedToast();
+        return;
+      }
+
+      setNodes((currentNodes) => {
+        const updatedNodes = currentNodes.map((node) =>
+          node.id === nodeId && node.data.text !== nextText
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  text: nextText,
+                },
+              }
+            : node
+        );
+
+        pushHistorySnapshot({ nodes: updatedNodes });
+
+        return updatedNodes;
+      });
+    },
+    [pushHistorySnapshot, setNodes, showLayerLockedToast]
+  );
+
+  const createPageSnapshot = useCallback(
+    (page: DiagramPage): DiagramSnapshot => {
+      const normalizedPage = ensurePageLayerRefs(page);
+
+      return {
+        nodes: toFlowNodes(
+          normalizedPage.nodes,
+          handleNodeTextChange,
+          showLayerLockedToast
+        ),
+        edges: toFlowEdges(normalizedPage.edges),
+        viewport: normalizedPage.viewport,
+        settings: normalizedPage.settings,
+      };
+    },
+    [handleNodeTextChange, showLayerLockedToast]
   );
 
   const applyHistorySnapshot = useCallback(
@@ -187,7 +308,7 @@ export function EditorShell() {
   );
 
   const handleUndo = useCallback(() => {
-    const snapshot = historyRef.current?.undo();
+    const snapshot = getActiveHistory()?.undo();
 
     if (!snapshot) {
       return;
@@ -195,10 +316,10 @@ export function EditorShell() {
 
     applyHistorySnapshot(snapshot);
     syncHistoryAvailability();
-  }, [applyHistorySnapshot, syncHistoryAvailability]);
+  }, [applyHistorySnapshot, getActiveHistory, syncHistoryAvailability]);
 
   const handleRedo = useCallback(() => {
-    const snapshot = historyRef.current?.redo();
+    const snapshot = getActiveHistory()?.redo();
 
     if (!snapshot) {
       return;
@@ -206,27 +327,84 @@ export function EditorShell() {
 
     applyHistorySnapshot(snapshot);
     syncHistoryAvailability();
-  }, [applyHistorySnapshot, syncHistoryAvailability]);
+  }, [applyHistorySnapshot, getActiveHistory, syncHistoryAvailability]);
 
-  const handleNodeTextChange = useCallback((nodeId: string, nextText: string) => {
-    setNodes((currentNodes) => {
-      const updatedNodes = currentNodes.map((node) =>
-        node.id === nodeId && node.data.text !== nextText
-          ? {
-              ...node,
-              data: {
-                ...node.data,
-                text: nextText,
-              },
-            }
-          : node
+  const hydratePage = useCallback(
+    (page: DiagramPage) => {
+      const normalizedPage = ensurePageLayerRefs(page);
+      const flowNodes = toFlowNodes(
+        normalizedPage.nodes,
+        handleNodeTextChange,
+        showLayerLockedToast
+      );
+      const flowEdges = toFlowEdges(normalizedPage.edges);
+      const sortedLayers = sortLayers(normalizedPage.layers);
+      const resolvedActiveLayerId = resolveActiveLayerId(
+        sortedLayers,
+        normalizedPage.activeLayerId
       );
 
-      pushHistorySnapshot({ nodes: updatedNodes });
+      setNodes(flowNodes);
+      setEdges(flowEdges);
+      setViewport(normalizedPage.viewport);
+      setCanvasViewport(normalizedPage.viewport);
+      setSnapEnabled(normalizedPage.settings.snapEnabled);
+      setGridSize(normalizedPage.settings.gridSize);
+      setLayers(sortedLayers);
+      setActiveLayerId(resolvedActiveLayerId);
+      setDefaultEdgeType(
+        flowEdges.find((edge) => edge.type === "straight")?.type === "straight"
+          ? "straight"
+          : "smoothstep"
+      );
+    },
+    [handleNodeTextChange, setEdges, setNodes, showLayerLockedToast]
+  );
 
-      return updatedNodes;
+  const buildRuntimePage = useCallback((basePage: DiagramPage): DiagramPage => {
+    const normalizedLayers = ensureLayerSet(layersRef.current);
+    const fallbackLayerId = normalizedLayers[0].id;
+    const { nodes: pageNodes, edges: pageEdges } = toDiagramPageRecords(
+      nodesRef.current,
+      edgesRef.current,
+      fallbackLayerId
+    );
+
+    return ensurePageLayerRefs({
+      ...basePage,
+      viewport: { ...viewportRef.current },
+      settings: {
+        snapEnabled: snapEnabledRef.current,
+        gridSize: gridSizeRef.current,
+      },
+      layers: normalizedLayers,
+      activeLayerId: resolveActiveLayerId(
+        normalizedLayers,
+        activeLayerIdRef.current ?? fallbackLayerId
+      ),
+      nodes: pageNodes,
+      edges: pageEdges,
     });
-  }, [pushHistorySnapshot, setNodes]);
+  }, []);
+
+  const commitCurrentRuntimeToPages = useCallback(
+    (basePages: DiagramPage[]) => {
+      const currentPageId = activePageIdRef.current;
+
+      if (!currentPageId) {
+        return basePages;
+      }
+
+      const basePage = basePages.find((page) => page.id === currentPageId);
+
+      if (!basePage) {
+        return basePages;
+      }
+
+      return upsertPage(basePages, buildRuntimePage(basePage));
+    },
+    [buildRuntimePage]
+  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -239,46 +417,42 @@ export function EditorShell() {
           return;
         }
 
-        const loadedNodes = toFlowNodes(diagram.data.nodes, handleNodeTextChange);
-        const loadedEdges = toFlowEdges(diagram.data.edges ?? []);
-        const loadedViewport = diagram.data.viewport ?? DEFAULT_VIEWPORT;
-        const loadedSettings: DiagramSettings = {
-          snapEnabled: diagram.data.settings?.snapEnabled ?? DEFAULT_SETTINGS.snapEnabled,
-          gridSize: diagram.data.settings?.gridSize ?? DEFAULT_GRID_SIZE,
-        };
+        const migrated = migrateDiagramData(diagram.data);
+        const normalizedPages = migrated.pages.map((page) => ensurePageLayerRefs(page));
+        const resolvedActivePageId = normalizedPages.some(
+          (page) => page.id === migrated.activePageId
+        )
+          ? migrated.activePageId
+          : normalizedPages[0].id;
+        const activePage =
+          normalizedPages.find((page) => page.id === resolvedActivePageId) ?? normalizedPages[0];
         const loadedTitle = diagram.title.trim().length > 0 ? diagram.title : "Untitled Diagram";
 
         setDiagramId(diagram.id);
         setTitle(loadedTitle);
-        setNodes(loadedNodes);
-        setEdges(loadedEdges);
-        setViewport(loadedViewport);
-        setCanvasViewport(loadedViewport);
-        setSnapEnabled(loadedSettings.snapEnabled);
-        setGridSize(loadedSettings.gridSize);
-
-        const firstEdgeType = loadedEdges.find((edge) => edge.type === "straight")?.type;
-        setDefaultEdgeType(firstEdgeType === "straight" ? "straight" : "smoothstep");
-
+        setPages(normalizedPages);
+        setActivePageId(resolvedActivePageId);
+        hydratePage(activePage);
         setCanvasMountKey((previous) => previous + 1);
         setLastSavedAt(diagram.updatedAt);
         setSaveStatus("saved");
 
-        historyRef.current = createHistory({
-          nodes: loadedNodes,
-          edges: loadedEdges,
-          viewport: loadedViewport,
-          settings: loadedSettings,
+        const nextHistories: Record<string, ReturnType<typeof createHistory>> = {};
+        normalizedPages.forEach((page) => {
+          nextHistories[page.id] = createHistory(createPageSnapshot(page));
         });
-        syncHistoryAvailability();
+        historiesRef.current = nextHistories;
+        syncHistoryAvailability(resolvedActivePageId);
+
+        const loadedData = {
+          dataVersion: 2 as const,
+          activePageId: resolvedActivePageId,
+          pages: normalizedPages,
+        };
 
         lastSavedSignatureRef.current = JSON.stringify({
           title: loadedTitle,
-          data: {
-            ...diagram.data,
-            edges: diagram.data.edges ?? [],
-            settings: loadedSettings,
-          },
+          data: loadedData,
         });
         currentSignatureRef.current = lastSavedSignatureRef.current;
         previousSignatureRef.current = lastSavedSignatureRef.current;
@@ -300,7 +474,7 @@ export function EditorShell() {
     return () => {
       isCancelled = true;
     };
-  }, [handleNodeTextChange, setEdges, setNodes, syncHistoryAvailability]);
+  }, [createPageSnapshot, hydratePage, syncHistoryAvailability]);
 
   useEffect(() => {
     return () => {
@@ -310,15 +484,104 @@ export function EditorShell() {
     };
   }, []);
 
-  const normalizedTitle = title.trim() || "Untitled Diagram";
-  const diagramDocument = useMemo(
-    () =>
-      toDiagramDocument(nodes, edges, viewport, {
+  const layerOrderMap = useMemo(
+    () => new Map(sortLayers(layers).map((layer) => [layer.id, layer.order])),
+    [layers]
+  );
+  const hiddenLayerIds = useMemo(
+    () => new Set(layers.filter((layer) => !layer.isVisible).map((layer) => layer.id)),
+    [layers]
+  );
+
+  const visibleNodes = useMemo(() => {
+    return nodes
+      .filter((node) => !hiddenLayerIds.has(node.data.layerId))
+      .map((node) => {
+        const locked = isLayerLocked(layers, node.data.layerId);
+        const layerOrder = layerOrderMap.get(node.data.layerId) ?? 0;
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isLocked: locked,
+            onLockedInteraction: showLayerLockedToast,
+          },
+          draggable: !locked,
+          selectable: !locked,
+          connectable: !locked,
+          zIndex: (layerOrder + 1) * 10,
+        };
+      });
+  }, [hiddenLayerIds, layerOrderMap, layers, nodes, showLayerLockedToast]);
+
+  const visibleNodeIds = useMemo(
+    () => new Set(visibleNodes.map((node) => node.id)),
+    [visibleNodes]
+  );
+
+  const visibleEdges = useMemo(() => {
+    return edges
+      .filter(
+        (edge) =>
+          !hiddenLayerIds.has(edge.layerId) &&
+          visibleNodeIds.has(edge.source) &&
+          visibleNodeIds.has(edge.target)
+      )
+      .map((edge) => {
+        const layerOrder = layerOrderMap.get(edge.layerId) ?? 0;
+
+        return {
+          ...edge,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          zIndex: (layerOrder + 1) * 10 - 1,
+        };
+      });
+  }, [edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]);
+
+  const diagramDocument = useMemo(() => {
+    if (!activePageId || pages.length === 0) {
+      return emptyDocumentRef.current;
+    }
+
+    const normalizedLayers = ensureLayerSet(layers);
+    const fallbackLayerId = normalizedLayers[0].id;
+    const resolvedLayerId = resolveActiveLayerId(
+      normalizedLayers,
+      activeLayerId ?? fallbackLayerId
+    );
+    const { nodes: pageNodes, edges: pageEdges } = toDiagramPageRecords(
+      nodes,
+      edges,
+      fallbackLayerId
+    );
+    const activePageName =
+      pages.find((page) => page.id === activePageId)?.name ?? "Page 1";
+
+    const activePage = ensurePageLayerRefs({
+      id: activePageId,
+      name: activePageName,
+      viewport,
+      settings: {
         snapEnabled,
         gridSize,
-      }),
-    [nodes, edges, viewport, snapEnabled, gridSize]
-  );
+      },
+      layers: normalizedLayers,
+      activeLayerId: resolvedLayerId,
+      nodes: pageNodes,
+      edges: pageEdges,
+    });
+
+    const mergedPages = upsertPage(pages, activePage).map((page) => ensurePageLayerRefs(page));
+
+    return {
+      dataVersion: 2 as const,
+      activePageId,
+      pages: mergedPages,
+    };
+  }, [activeLayerId, activePageId, edges, gridSize, layers, nodes, pages, snapEnabled, viewport]);
+
+  const normalizedTitle = title.trim() || "Untitled Diagram";
   const currentSignature = useMemo(
     () =>
       JSON.stringify({
@@ -518,29 +781,156 @@ export function EditorShell() {
     };
   }, [handleClearSelection, handleDeleteSelection, handleRedo, handleUndo]);
 
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<Node<EditorNodeData>>[]) => {
+      const lockedLayerIds = new Set(
+        layersRef.current.filter((layer) => layer.isLocked).map((layer) => layer.id)
+      );
+      let blocked = false;
+      const filtered = changes.filter((change) => {
+        if (
+          change.type !== "position" &&
+          change.type !== "remove" &&
+          change.type !== "select"
+        ) {
+          return true;
+        }
+
+        const node = nodesRef.current.find((entry) => entry.id === change.id);
+
+        if (!node) {
+          return true;
+        }
+
+        if (!lockedLayerIds.has(node.data.layerId)) {
+          return true;
+        }
+
+        blocked = true;
+        return false;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+
+      rawOnNodesChange(filtered);
+    },
+    [rawOnNodesChange, showLayerLockedToast]
+  );
+
+  const handlePageSwitch = useCallback(
+    (nextPageId: string) => {
+      const currentPageId = activePageIdRef.current;
+
+      if (!nextPageId || !currentPageId || nextPageId === currentPageId) {
+        return;
+      }
+
+      const committedPages = commitCurrentRuntimeToPages(pagesRef.current);
+      const nextPage = committedPages.find((page) => page.id === nextPageId);
+
+      if (!nextPage) {
+        return;
+      }
+
+      setPages(committedPages);
+      setActivePageId(nextPageId);
+      activePageIdRef.current = nextPageId;
+      setActiveTool("select");
+      hydratePage(nextPage);
+      setCanvasMountKey((previous) => previous + 1);
+
+      if (!historiesRef.current[nextPageId]) {
+        historiesRef.current[nextPageId] = createHistory(createPageSnapshot(nextPage));
+      }
+
+      syncHistoryAvailability(nextPageId);
+    },
+    [commitCurrentRuntimeToPages, createPageSnapshot, hydratePage, syncHistoryAvailability]
+  );
+
+  const handleAddPage = useCallback(() => {
+    const committedPages = commitCurrentRuntimeToPages(pagesRef.current);
+    const page = createDefaultPage({
+      name: nextPageName(committedPages),
+      settings: {
+        snapEnabled: snapEnabledRef.current,
+        gridSize: gridSizeRef.current,
+      },
+      viewport: { ...DEFAULT_VIEWPORT },
+    });
+    const nextPages = [...committedPages, page];
+
+    setPages(nextPages);
+    setActivePageId(page.id);
+    activePageIdRef.current = page.id;
+    setActiveTool("select");
+    hydratePage(page);
+    setCanvasMountKey((previous) => previous + 1);
+
+    historiesRef.current[page.id] = createHistory(createPageSnapshot(page));
+    syncHistoryAvailability(page.id);
+  }, [commitCurrentRuntimeToPages, createPageSnapshot, hydratePage, syncHistoryAvailability]);
+
   const handleConnect = useCallback(
     (connection: Connection) => {
+      if (!connection.source || !connection.target) {
+        return;
+      }
+
+      const sourceNode = nodesRef.current.find((node) => node.id === connection.source);
+      const targetNode = nodesRef.current.find((node) => node.id === connection.target);
+
+      if (!sourceNode || !targetNode) {
+        return;
+      }
+
+      const edgeLayerId = activeLayerIdRef.current ?? sourceNode.data.layerId;
+
+      if (
+        isLayerLocked(layersRef.current, sourceNode.data.layerId) ||
+        isLayerLocked(layersRef.current, targetNode.data.layerId) ||
+        isLayerLocked(layersRef.current, edgeLayerId)
+      ) {
+        showLayerLockedToast();
+        return;
+      }
+
       setEdges((currentEdges) => {
         const nextEdges = addEdge(
           {
             ...connection,
             type: defaultEdgeType,
             markerEnd: { type: MarkerType.ArrowClosed },
+            layerId: edgeLayerId,
           },
           currentEdges
-        );
+        ) as EditorEdge[];
 
         pushHistorySnapshot({ edges: nextEdges });
 
         return nextEdges;
       });
     },
-    [defaultEdgeType, pushHistorySnapshot, setEdges]
+    [defaultEdgeType, pushHistorySnapshot, setEdges, showLayerLockedToast]
   );
 
   const handleCanvasPlaceNode = useCallback(
     (position: { x: number; y: number }) => {
       if (!isPlaceableNodeTool(activeTool)) {
+        return;
+      }
+
+      const normalizedLayers = ensureLayerSet(layersRef.current);
+      const fallbackLayerId = normalizedLayers[0].id;
+      const targetLayerId = resolveActiveLayerId(
+        normalizedLayers,
+        activeLayerIdRef.current ?? fallbackLayerId
+      );
+
+      if (isLayerLocked(normalizedLayers, targetLayerId)) {
+        showLayerLockedToast();
         return;
       }
 
@@ -550,10 +940,14 @@ export function EditorShell() {
         type: activeTool,
         x: nextPosition.x,
         y: nextPosition.y,
+        layerId: targetLayerId,
       });
 
       setNodes((currentNodes) => {
-        const nextNodes = [...currentNodes, ...toFlowNodes([nodeRecord], handleNodeTextChange)];
+        const nextNodes = [
+          ...currentNodes,
+          ...toFlowNodes([nodeRecord], handleNodeTextChange, showLayerLockedToast),
+        ];
 
         pushHistorySnapshot({ nodes: nextNodes });
 
@@ -561,7 +955,15 @@ export function EditorShell() {
       });
       setActiveTool("select");
     },
-    [activeTool, gridSize, handleNodeTextChange, pushHistorySnapshot, setNodes, snapEnabled]
+    [
+      activeTool,
+      gridSize,
+      handleNodeTextChange,
+      pushHistorySnapshot,
+      setNodes,
+      showLayerLockedToast,
+      snapEnabled,
+    ]
   );
 
   const handleNodeDragStart = useCallback(() => {
@@ -571,6 +973,11 @@ export function EditorShell() {
   const handleNodeDragStop = useCallback(
     (node: Node<EditorNodeData>) => {
       isDraggingNodeRef.current = false;
+
+      if (isLayerLocked(layersRef.current, node.data.layerId)) {
+        showLayerLockedToast();
+        return;
+      }
 
       if (snapEnabledRef.current) {
         setNodes((currentNodes) => {
@@ -587,7 +994,7 @@ export function EditorShell() {
 
       pushHistorySnapshot();
     },
-    [pushHistorySnapshot, setNodes]
+    [pushHistorySnapshot, setNodes, showLayerLockedToast]
   );
 
   const handleZoomIn = useCallback(() => {
@@ -602,6 +1009,66 @@ export function EditorShell() {
     void flowInstance?.fitView({ duration: 220, padding: 0.2 });
   }, [flowInstance]);
 
+  const handleAddLayer = useCallback(() => {
+    setLayers((currentLayers) => {
+      const normalized = ensureLayerSet(currentLayers);
+      const nextLayer = createDefaultLayer(
+        normalized.length,
+        createLayerName(normalized.length)
+      );
+      const nextLayers = [...normalized, nextLayer];
+      setActiveLayerId(nextLayer.id);
+      return nextLayers;
+    });
+  }, []);
+
+  const handleSelectLayer = useCallback((layerId: string) => {
+    setActiveLayerId(layerId);
+  }, []);
+
+  const handleRenameLayer = useCallback((layerId: string, name: string) => {
+    setLayers((currentLayers) =>
+      currentLayers.map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              name: name.trim().length > 0 ? name : "Layer",
+            }
+          : layer
+      )
+    );
+  }, []);
+
+  const handleToggleLayerVisibility = useCallback((layerId: string) => {
+    setLayers((currentLayers) =>
+      currentLayers.map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              isVisible: !layer.isVisible,
+            }
+          : layer
+      )
+    );
+  }, []);
+
+  const handleToggleLayerLock = useCallback((layerId: string) => {
+    setLayers((currentLayers) =>
+      currentLayers.map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              isLocked: !layer.isLocked,
+            }
+          : layer
+      )
+    );
+  }, []);
+
+  const handleMoveLayer = useCallback((layerId: string, direction: "up" | "down") => {
+    setLayers((currentLayers) => reorderLayers(currentLayers, layerId, direction));
+  }, []);
+
   return (
     <>
       <main className="h-dvh w-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(46,58,80,0.55),rgba(15,23,42,0.98)_60%)]">
@@ -614,6 +1081,11 @@ export function EditorShell() {
               saveStatus={saveStatus}
               lastSavedAt={lastSavedAt}
               isDirty={isDirty}
+              pages={pages.map((page) => ({ id: page.id, name: page.name }))}
+              activePageId={activePageId}
+              onPageChange={handlePageSwitch}
+              onAddPage={handleAddPage}
+              isPageDisabled={isLoading}
               onOpenMobileChat={() => setIsMobileChatOpen(true)}
             />
             <div className="flex min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-5">
@@ -627,22 +1099,23 @@ export function EditorShell() {
                   <>
                     <EditorCanvas
                       key={canvasMountKey}
-                      nodes={nodes}
-                      edges={edges}
+                      nodes={visibleNodes}
+                      edges={visibleEdges}
                       activeTool={activeTool}
                       gridVisible={gridVisible}
                       snapEnabled={snapEnabled}
                       gridSize={gridSize}
                       defaultEdgeType={defaultEdgeType}
                       initialViewport={canvasViewport}
-                      onNodesChange={onNodesChange}
-                      onEdgesChange={onEdgesChange}
+                      onNodesChange={handleNodesChange}
+                      onEdgesChange={rawOnEdgesChange}
                       onConnect={handleConnect}
                       onViewportChange={setViewport}
                       onCanvasPlaceNode={handleCanvasPlaceNode}
                       onNodeDragStart={handleNodeDragStart}
                       onNodeDragStop={handleNodeDragStop}
                       onReady={setFlowInstance}
+                      onLockedNodeInteraction={showLayerLockedToast}
                     />
                     <EditorBottomControls
                       zoom={viewport.zoom}
@@ -681,7 +1154,27 @@ export function EditorShell() {
                 )}
               </div>
               <aside className="hidden w-[320px] shrink-0 lg:block">
-                <EditorChatPanel />
+                <Tabs defaultValue="chat" className="h-full">
+                  <TabsList className="grid w-full grid-cols-2 bg-zinc-100">
+                    <TabsTrigger value="chat">Chat</TabsTrigger>
+                    <TabsTrigger value="layers">Layers</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="chat" className="h-[calc(100%-2.5rem)]">
+                    <EditorChatPanel className="h-full" />
+                  </TabsContent>
+                  <TabsContent value="layers" className="h-[calc(100%-2.5rem)]">
+                    <LayersPanel
+                      layers={layers}
+                      activeLayerId={activeLayerId}
+                      onSelectLayer={handleSelectLayer}
+                      onRenameLayer={handleRenameLayer}
+                      onToggleVisibility={handleToggleLayerVisibility}
+                      onToggleLock={handleToggleLayerLock}
+                      onMoveLayer={handleMoveLayer}
+                      onAddLayer={handleAddLayer}
+                    />
+                  </TabsContent>
+                </Tabs>
               </aside>
             </div>
           </section>

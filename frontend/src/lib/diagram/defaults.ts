@@ -7,6 +7,11 @@ import type {
   DiagramViewport,
 } from "@/lib/diagram/types";
 
+const createId = (prefix: string) =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 export const DEFAULT_VIEWPORT: DiagramViewport = {
   x: 0,
   y: 0,
@@ -60,11 +65,13 @@ export const createDefaultNodeRecord = ({
   type,
   x,
   y,
+  layerId,
 }: {
   id: string;
   type: DiagramNodeType;
   x: number;
   y: number;
+  layerId: string;
 }): DiagramNodeRecord => ({
   id,
   type,
@@ -72,12 +79,35 @@ export const createDefaultNodeRecord = ({
   size: getDefaultNodeSize(type),
   text: DEFAULT_NODE_TEXT[type],
   style: getDefaultNodeStyle(type),
+  layerId,
 });
 
-export const createEmptyDiagramDocument = (): DiagramDocument => ({
-  version: 1,
-  nodes: [],
-  edges: [],
-  viewport: DEFAULT_VIEWPORT,
-  settings: { ...DEFAULT_SETTINGS },
-});
+export const createEmptyDiagramDocument = (): DiagramDocument => {
+  const pageId = createId("page");
+  const layerId = createId("layer");
+
+  return {
+    dataVersion: 2,
+    activePageId: pageId,
+    pages: [
+      {
+        id: pageId,
+        name: "Page 1",
+        viewport: { ...DEFAULT_VIEWPORT },
+        settings: { ...DEFAULT_SETTINGS },
+        layers: [
+          {
+            id: layerId,
+            name: "Layer 1",
+            order: 0,
+            isVisible: true,
+            isLocked: false,
+          },
+        ],
+        activeLayerId: layerId,
+        nodes: [],
+        edges: [],
+      },
+    ],
+  };
+};

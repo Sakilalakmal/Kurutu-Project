@@ -48,6 +48,7 @@ const snapshotSignature = (snapshot: DiagramSnapshot) =>
       text: node.data?.text ?? "",
       size: node.data?.size ?? null,
       style: node.data?.style ?? null,
+      layerId: node.data?.layerId ?? null,
     })),
     edges: snapshot.edges.map((edge) => ({
       id: edge.id,
@@ -57,6 +58,7 @@ const snapshotSignature = (snapshot: DiagramSnapshot) =>
       targetHandle: edge.targetHandle ?? null,
       type: edge.type ?? "smoothstep",
       selected: Boolean(edge.selected),
+      layerId: edge.layerId ?? null,
     })),
     viewport: snapshot.viewport,
     settings: snapshot.settings,

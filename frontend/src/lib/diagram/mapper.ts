@@ -1,17 +1,10 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
-import {
-  createEmptyDiagramDocument,
-  getDefaultNodeSize,
-  getDefaultNodeStyle,
-} from "@/lib/diagram/defaults";
+import { getDefaultNodeSize, getDefaultNodeStyle } from "@/lib/diagram/defaults";
 import type {
-  DiagramDocument,
   DiagramEdgeRecord,
   DiagramEdgeType,
   DiagramNodeRecord,
-  DiagramSettings,
   DiagramNodeType,
-  DiagramViewport,
 } from "@/lib/diagram/types";
 
 export type EditorNodeData = {
@@ -25,17 +18,26 @@ export type EditorNodeData = {
     stroke: string;
     textColor: string;
   };
+  layerId: string;
+  isLocked: boolean;
   onTextChange: (nodeId: string, nextText: string) => void;
+  onLockedInteraction: () => void;
 };
 
-export type EditorEdge = Edge;
+export type EditorEdge = Edge & {
+  layerId: string;
+};
 
 const isDiagramNodeType = (value: string): value is DiagramNodeType =>
   value === "rectangle" || value === "ellipse" || value === "sticky";
 
+const isDiagramEdgeType = (value: string | undefined): value is DiagramEdgeType =>
+  value === "smoothstep" || value === "straight";
+
 export const toFlowNodes = (
   records: DiagramNodeRecord[],
-  onTextChange: (nodeId: string, nextText: string) => void
+  onTextChange: (nodeId: string, nextText: string) => void,
+  onLockedInteraction: () => void
 ): Node<EditorNodeData>[] =>
   records.map((record) => ({
     id: record.id,
@@ -45,12 +47,12 @@ export const toFlowNodes = (
       text: record.text,
       size: record.size,
       style: record.style,
+      layerId: record.layerId,
+      isLocked: false,
       onTextChange,
+      onLockedInteraction,
     },
   }));
-
-const isDiagramEdgeType = (value: string | undefined): value is DiagramEdgeType =>
-  value === "smoothstep" || value === "straight";
 
 export const toFlowEdges = (records: DiagramEdgeRecord[]): EditorEdge[] =>
   records.map((record) => ({
@@ -61,9 +63,10 @@ export const toFlowEdges = (records: DiagramEdgeRecord[]): EditorEdge[] =>
     targetHandle: record.targetHandle,
     type: isDiagramEdgeType(record.type) ? record.type : "smoothstep",
     markerEnd: { type: MarkerType.ArrowClosed },
+    layerId: record.layerId,
   }));
 
-const toNodeRecord = (node: Node<EditorNodeData>): DiagramNodeRecord | null => {
+const toNodeRecord = (node: Node<EditorNodeData>, fallbackLayerId: string): DiagramNodeRecord | null => {
   const rawType = node.type ?? "";
 
   if (!isDiagramNodeType(rawType)) {
@@ -83,10 +86,11 @@ const toNodeRecord = (node: Node<EditorNodeData>): DiagramNodeRecord | null => {
     size: node.data?.size ?? fallbackSize,
     text: node.data?.text ?? rawType,
     style: node.data?.style ?? fallbackStyle,
+    layerId: node.data?.layerId ?? fallbackLayerId,
   };
 };
 
-const toEdgeRecord = (edge: EditorEdge): DiagramEdgeRecord | null => {
+const toEdgeRecord = (edge: EditorEdge, fallbackLayerId: string): DiagramEdgeRecord | null => {
   if (!edge.source || !edge.target) {
     return null;
   }
@@ -98,26 +102,19 @@ const toEdgeRecord = (edge: EditorEdge): DiagramEdgeRecord | null => {
     sourceHandle: edge.sourceHandle ?? undefined,
     targetHandle: edge.targetHandle ?? undefined,
     type: isDiagramEdgeType(edge.type) ? edge.type : "smoothstep",
+    layerId: edge.layerId ?? fallbackLayerId,
   };
 };
 
-export const toDiagramDocument = (
+export const toDiagramPageRecords = (
   nodes: Node<EditorNodeData>[],
   edges: EditorEdge[],
-  viewport: DiagramViewport,
-  settings: DiagramSettings
-): DiagramDocument => {
-  const base = createEmptyDiagramDocument();
-
-  return {
-    ...base,
-    nodes: nodes
-      .map((node) => toNodeRecord(node))
-      .filter((record): record is DiagramNodeRecord => record !== null),
-    edges: edges
-      .map((edge) => toEdgeRecord(edge))
-      .filter((record): record is DiagramEdgeRecord => record !== null),
-    viewport,
-    settings,
-  };
-};
+  fallbackLayerId: string
+) => ({
+  nodes: nodes
+    .map((node) => toNodeRecord(node, fallbackLayerId))
+    .filter((record): record is DiagramNodeRecord => record !== null),
+  edges: edges
+    .map((edge) => toEdgeRecord(edge, fallbackLayerId))
+    .filter((record): record is DiagramEdgeRecord => record !== null),
+});
