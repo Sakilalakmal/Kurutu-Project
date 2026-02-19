@@ -19,12 +19,15 @@ export function EditorChatPanel({ className }: { className?: string }) {
     <Card
       className={cn(
         "flex h-full min-h-[420px] w-full flex-col rounded-2xl border-zinc-200/80 bg-white/90 p-3 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.75)] backdrop-blur",
+        "dark:border-zinc-800 dark:bg-zinc-950/90",
         className
       )}
     >
       <div className="mb-2 flex items-center justify-between px-1">
-        <h2 className="text-sm font-semibold text-zinc-900">Chat</h2>
-        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-500">Mock</span>
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Chat</h2>
+        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+          Mock
+        </span>
       </div>
       <Separator />
       <div className="mt-3 flex-1 space-y-3 overflow-y-auto pr-1">
@@ -34,8 +37,8 @@ export function EditorChatPanel({ className }: { className?: string }) {
             className={cn(
               "max-w-[90%] rounded-2xl border px-3 py-2 text-sm transition-colors duration-200",
               message.own
-                ? "ml-auto border-zinc-900 bg-zinc-900 text-white"
-                : "border-zinc-200 bg-zinc-50 text-zinc-700"
+                ? "ml-auto border-zinc-900 bg-zinc-900 text-white dark:border-zinc-200 dark:bg-zinc-100 dark:text-zinc-900"
+                : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
             )}
           >
             {!message.own ? (
@@ -43,7 +46,7 @@ export function EditorChatPanel({ className }: { className?: string }) {
                 <Avatar size="sm">
                   <AvatarFallback>{message.author.slice(0, 1)}</AvatarFallback>
                 </Avatar>
-                <span className="text-[11px] text-zinc-500">{message.author}</span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{message.author}</span>
               </div>
             ) : null}
             <p>{message.body}</p>
@@ -54,12 +57,12 @@ export function EditorChatPanel({ className }: { className?: string }) {
         <Input
           aria-label="Chat message input"
           placeholder="Start typing..."
-          className="h-9 rounded-xl border-zinc-200 bg-white"
+          className="h-9 rounded-xl border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
           disabled
         />
         <Button
           size="icon-sm"
-          className="h-9 w-9 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800"
+          className="h-9 w-9 rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           aria-label="Send message"
           disabled
         >

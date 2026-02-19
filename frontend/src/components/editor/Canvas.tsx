@@ -9,7 +9,6 @@ import {
 import {
   Background,
   BackgroundVariant,
-  ConnectionLineType,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
@@ -23,6 +22,7 @@ import {
 import { editorNodeTypes } from "@/components/editor/nodes";
 import { SnapGuidesOverlay } from "@/components/editor/SnapGuidesOverlay";
 import { ASSET_DRAG_MIME } from "@/lib/assets/catalog";
+import { toConnectionLineType, toRuntimeEdgeType } from "@/lib/diagram/edges";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
 import type { SnapGuides } from "@/lib/diagram/smartSnap";
 import type { DiagramEdgeType, DiagramViewport, EditorTool } from "@/lib/diagram/types";
@@ -36,7 +36,8 @@ type EditorCanvasProps = {
   snapEnabled: boolean;
   gridSize: number;
   snapGuides?: SnapGuides | null;
-  defaultEdgeType: DiagramEdgeType;
+  edgeStyle: DiagramEdgeType;
+  edgeAnimated: boolean;
   initialViewport: DiagramViewport;
   onNodesChange: OnNodesChange<Node<EditorNodeData>>;
   onEdgesChange: OnEdgesChange<EditorEdge>;
@@ -66,7 +67,8 @@ function EditorCanvasInner({
   snapEnabled,
   gridSize,
   snapGuides,
-  defaultEdgeType,
+  edgeStyle,
+  edgeAnimated,
   initialViewport,
   onNodesChange,
   onEdgesChange,
@@ -85,18 +87,15 @@ function EditorCanvasInner({
     ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
 
-  const connectionLineType =
-    defaultEdgeType === "straight"
-      ? ConnectionLineType.Straight
-      : ConnectionLineType.SmoothStep;
+  const connectionLineType = toConnectionLineType(edgeStyle);
 
   const defaultEdgeOptions = useMemo(
     () => ({
-      type: defaultEdgeType,
+      type: toRuntimeEdgeType(edgeStyle),
       markerEnd: { type: MarkerType.ArrowClosed },
-      animated: false,
+      animated: edgeAnimated,
     }),
-    [defaultEdgeType]
+    [edgeAnimated, edgeStyle]
   );
 
   const handlePaneClick = (

@@ -63,7 +63,7 @@ export function TemplatesDialog({
 }: TemplatesDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl border-zinc-200 bg-white">
+      <DialogContent className="max-w-3xl border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <WandSparkles className="size-4 text-blue-600" />
@@ -78,18 +78,20 @@ export function TemplatesDialog({
           {templates.map((template) => (
             <Card
               key={template.id}
-              className="overflow-hidden border-zinc-200 bg-white shadow-[0_16px_34px_-26px_rgba(15,23,42,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_42px_-30px_rgba(15,23,42,0.6)]"
-            >
-              <div className="h-36 border-b border-zinc-100 bg-gradient-to-b from-zinc-50 to-white p-3">
+                className="overflow-hidden border-zinc-200 bg-white shadow-[0_16px_34px_-26px_rgba(15,23,42,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_42px_-30px_rgba(15,23,42,0.6)] dark:border-zinc-700 dark:bg-zinc-900"
+              >
+              <div className="h-36 border-b border-zinc-100 bg-gradient-to-b from-zinc-50 to-white p-3 dark:border-zinc-700 dark:from-zinc-900 dark:to-zinc-900">
                 <PreviewSvg templateId={template.id} />
               </div>
               <div className="space-y-3 p-4">
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-zinc-900">{template.name}</p>
-                  <p className="text-xs text-zinc-500">{template.description}</p>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    {template.name}
+                  </p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">{template.description}</p>
                 </div>
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] tracking-wide text-zinc-400 uppercase">
+                  <p className="text-[11px] tracking-wide text-zinc-400 uppercase dark:text-zinc-500">
                     {template.category}
                   </p>
                   <Button

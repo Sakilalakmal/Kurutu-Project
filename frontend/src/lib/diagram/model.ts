@@ -34,12 +34,19 @@ export const diagramViewportSchema = z.object({
 });
 export type DiagramViewport = z.infer<typeof diagramViewportSchema>;
 
-export const diagramEdgeTypeSchema = z.enum(["smoothstep", "straight"]);
+export const diagramEdgeTypeSchema = z.enum([
+  "smoothstep",
+  "straight",
+  "step",
+  "bezier",
+]);
 export type DiagramEdgeType = z.infer<typeof diagramEdgeTypeSchema>;
 
 export const diagramSettingsSchema = z.object({
   snapEnabled: z.boolean().default(true),
   gridSize: z.number().int().positive().default(10),
+  edgeStyle: diagramEdgeTypeSchema.default("smoothstep"),
+  edgeAnimated: z.boolean().default(false),
 });
 export type DiagramSettings = z.infer<typeof diagramSettingsSchema>;
 

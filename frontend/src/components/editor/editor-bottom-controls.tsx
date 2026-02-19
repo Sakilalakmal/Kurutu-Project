@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { EDGE_STYLE_LABELS } from "@/lib/diagram/edges";
 import type { DiagramEdgeType } from "@/lib/diagram/types";
 
 type EditorBottomControlsProps = {
@@ -58,7 +59,7 @@ export function EditorBottomControls({
   className,
 }: EditorBottomControlsProps) {
   const controlButtonClass =
-    "h-9 w-9 rounded-xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:ring-2 focus-visible:ring-blue-500";
+    "h-9 w-9 rounded-xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100";
 
   const toggleButtonClass =
     "h-9 w-9 rounded-xl transition-all duration-200 focus-visible:ring-2 focus-visible:ring-blue-500";
@@ -103,7 +104,7 @@ export function EditorBottomControls({
     <TooltipProvider>
       <Card
         className={cn(
-          "absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_20px_55px_-45px_rgba(15,23,42,0.7)] backdrop-blur",
+          "absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_20px_55px_-45px_rgba(15,23,42,0.7)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90",
           className
         )}
       >
@@ -124,7 +125,7 @@ export function EditorBottomControls({
           onClick: onZoomOut,
           icon: <Minus className="size-3.5" />,
         })}
-        <span className="min-w-14 text-center text-xs font-medium text-zinc-600">
+        <span className="min-w-14 text-center text-xs font-medium text-zinc-600 dark:text-zinc-300">
           {Math.round(zoom * 100)}%
         </span>
         {renderTooltipButton({
@@ -157,7 +158,9 @@ export function EditorBottomControls({
               aria-label="Toggle default edge type"
               className={cn(
                 "h-9 w-9 rounded-xl text-zinc-600 transition-all duration-200 hover:bg-zinc-100 hover:text-zinc-900 focus-visible:ring-2 focus-visible:ring-blue-500",
-                defaultEdgeType === "straight" && "bg-zinc-900 text-white hover:bg-zinc-800"
+                "dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
+                defaultEdgeType !== "smoothstep" &&
+                  "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
               )}
               onClick={onToggleEdgeType}
             >
@@ -165,7 +168,7 @@ export function EditorBottomControls({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={8}>
-            Default edge: {defaultEdgeType === "smoothstep" ? "smoothstep" : "straight"}
+            Connector style: {EDGE_STYLE_LABELS[defaultEdgeType]}
           </TooltipContent>
         </Tooltip>
       </Card>
