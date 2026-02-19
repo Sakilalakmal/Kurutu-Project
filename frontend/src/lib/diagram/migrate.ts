@@ -24,6 +24,8 @@ const legacyDiagramDocumentSchema = z.object({
     .default({
       snapEnabled: DEFAULT_SETTINGS.snapEnabled,
       gridSize: DEFAULT_GRID_SIZE,
+      edgeStyle: DEFAULT_SETTINGS.edgeStyle,
+      edgeAnimated: DEFAULT_SETTINGS.edgeAnimated,
     }),
 });
 

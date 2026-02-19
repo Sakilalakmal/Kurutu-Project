@@ -92,9 +92,9 @@ export function EditorToolbar({
 
   return (
     <TooltipProvider>
-      <Card className="flex w-[280px] shrink-0 flex-col rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_20px_55px_-45px_rgba(15,23,42,0.7)] backdrop-blur">
+      <Card className="flex w-[280px] shrink-0 flex-col rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_20px_55px_-45px_rgba(15,23,42,0.7)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
         <Tabs defaultValue="tools" className="flex h-full flex-col">
-          <TabsList className="grid w-full grid-cols-2 bg-zinc-100">
+          <TabsList className="grid w-full grid-cols-2 bg-zinc-100 dark:bg-zinc-900">
             <TabsTrigger value="tools" className="gap-1.5">
               <Wrench className="size-3.5" />
               Tools
@@ -120,9 +120,10 @@ export function EditorToolbar({
                         aria-pressed={active}
                         disabled={tool.disabled}
                         className={cn(
-                          "h-10 justify-start gap-2 rounded-xl px-3 text-zinc-600 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-zinc-900",
+                          "h-10 justify-start gap-2 rounded-xl px-3 text-zinc-600 transition-all duration-200 hover:-translate-y-0.5 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
                           "focus-visible:ring-2 focus-visible:ring-blue-500",
-                          active && "bg-zinc-900 text-white hover:bg-zinc-800 hover:text-white"
+                          active &&
+                            "bg-zinc-900 text-white hover:bg-zinc-800 hover:text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
                         )}
                         onClick={() => onToolSelect(tool.id)}
                       >
@@ -158,7 +159,7 @@ export function EditorToolbar({
             <ScrollArea className="h-[calc(100vh-20rem)] pr-2">
               <div className="space-y-4 pb-1">
                 {groupedAssets.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-zinc-200 p-3 text-xs text-zinc-500">
+                    <p className="rounded-xl border border-dashed border-zinc-200 p-3 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
                     No assets match your search.
                   </p>
                 ) : null}
@@ -166,7 +167,7 @@ export function EditorToolbar({
                   <section key={group.category} aria-label={`${group.category} assets`}>
                     {index > 0 ? <Separator className="mb-3" /> : null}
                     <div className="mb-2 flex items-center justify-between">
-                      <h3 className="text-xs font-semibold tracking-wide text-zinc-700 uppercase">
+                      <h3 className="text-xs font-semibold tracking-wide text-zinc-700 uppercase dark:text-zinc-300">
                         {group.category}
                       </h3>
                       <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px]">
@@ -186,13 +187,15 @@ export function EditorToolbar({
                           }}
                           onClick={() => onAssetInsert(asset.id)}
                           className={cn(
-                            "flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left transition-all duration-200",
-                            "hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_12px_24px_-20px_rgba(15,23,42,0.7)]",
+                            "flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left transition-all duration-200 dark:border-zinc-700 dark:bg-zinc-900",
+                            "hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_12px_24px_-20px_rgba(15,23,42,0.7)] dark:hover:border-zinc-600",
                             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                           )}
                           aria-label={`Insert ${asset.name}`}
                         >
-                          <span className="truncate text-sm text-zinc-800">{asset.name}</span>
+                          <span className="truncate text-sm text-zinc-800 dark:text-zinc-100">
+                            {asset.name}
+                          </span>
                           <span className="text-[10px] tracking-wide text-zinc-400 uppercase">
                             drag
                           </span>

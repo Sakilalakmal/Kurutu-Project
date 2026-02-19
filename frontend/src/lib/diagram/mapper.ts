@@ -1,8 +1,8 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import { getDefaultNodeSize, getDefaultNodeStyle } from "@/lib/diagram/defaults";
+import { toRuntimeEdgeType, toStoredEdgeStyle } from "@/lib/diagram/edges";
 import type {
   DiagramEdgeRecord,
-  DiagramEdgeType,
   DiagramNodeRecord,
   DiagramNodeType,
 } from "@/lib/diagram/types";
@@ -41,9 +41,6 @@ const isDiagramNodeType = (value: string): value is DiagramNodeType =>
   value === "wireframeSidebar" ||
   value === "wireframeModal";
 
-const isDiagramEdgeType = (value: string | undefined): value is DiagramEdgeType =>
-  value === "smoothstep" || value === "straight";
-
 export const toFlowNodes = (
   records: DiagramNodeRecord[],
   onTextChange: (nodeId: string, nextText: string) => void,
@@ -73,7 +70,7 @@ export const toFlowEdges = (records: DiagramEdgeRecord[]): EditorEdge[] =>
     target: record.target,
     sourceHandle: record.sourceHandle,
     targetHandle: record.targetHandle,
-    type: isDiagramEdgeType(record.type) ? record.type : "smoothstep",
+    type: toRuntimeEdgeType(toStoredEdgeStyle(record.type)),
     markerEnd: { type: MarkerType.ArrowClosed },
     layerId: record.layerId,
   }));
@@ -113,7 +110,7 @@ const toEdgeRecord = (edge: EditorEdge, fallbackLayerId: string): DiagramEdgeRec
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? undefined,
     targetHandle: edge.targetHandle ?? undefined,
-    type: isDiagramEdgeType(edge.type) ? edge.type : "smoothstep",
+    type: toStoredEdgeStyle(edge.type),
     layerId: edge.layerId ?? fallbackLayerId,
   };
 };

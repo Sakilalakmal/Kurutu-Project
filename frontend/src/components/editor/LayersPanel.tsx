@@ -42,16 +42,16 @@ export function LayersPanel({
   const orderedLayers = [...layers].sort((a, b) => a.order - b.order);
 
   return (
-    <Card className="flex h-full min-h-[420px] w-full flex-col rounded-2xl border-zinc-200/80 bg-white/90 p-3 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.75)] backdrop-blur">
+    <Card className="flex h-full min-h-[420px] w-full flex-col rounded-2xl border-zinc-200/80 bg-white/90 p-3 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.75)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
       <div className="mb-2 flex items-center justify-between px-1">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
           <Layers3 className="size-4" />
           Layers
         </h2>
         <Button
           size="sm"
           variant="outline"
-          className="h-7 border-zinc-200 bg-white text-xs"
+          className="h-7 border-zinc-200 bg-white text-xs dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
           onClick={onAddLayer}
         >
           <Plus className="size-3.5" />
@@ -67,8 +67,8 @@ export function LayersPanel({
               className={cn(
                 "rounded-xl border p-2 transition-colors",
                 layer.id === activeLayerId
-                  ? "border-blue-200 bg-blue-50/60"
-                  : "border-zinc-200 bg-zinc-50/70"
+                  ? "border-blue-200 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/40"
+                  : "border-zinc-200 bg-zinc-50/70 dark:border-zinc-700 dark:bg-zinc-900/70"
               )}
             >
               <button
@@ -76,16 +76,16 @@ export function LayersPanel({
                 onClick={() => onSelectLayer(layer.id)}
                 className="mb-2 flex w-full items-center justify-between text-left"
               >
-                <span className="text-[11px] font-medium text-zinc-500">
+                <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                   {layer.id === activeLayerId ? "Active" : "Layer"}
                 </span>
-                <span className="text-[11px] text-zinc-400">#{index + 1}</span>
+                <span className="text-[11px] text-zinc-400 dark:text-zinc-500">#{index + 1}</span>
               </button>
               <Input
                 value={layer.name}
                 onChange={(event) => onRenameLayer(layer.id, event.target.value)}
                 onFocus={() => onSelectLayer(layer.id)}
-                className="h-8 border-zinc-200 bg-white text-sm"
+                className="h-8 border-zinc-200 bg-white text-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 aria-label={`${layer.name} name`}
               />
               <div className="mt-2 flex items-center justify-between">
@@ -93,7 +93,7 @@ export function LayersPanel({
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100"
+                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     onClick={() => onToggleVisibility(layer.id)}
                     aria-label={layer.isVisible ? "Hide layer" : "Show layer"}
                   >
@@ -102,7 +102,7 @@ export function LayersPanel({
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100"
+                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     onClick={() => onToggleLock(layer.id)}
                     aria-label={layer.isLocked ? "Unlock layer" : "Lock layer"}
                   >
@@ -113,7 +113,7 @@ export function LayersPanel({
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100"
+                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     onClick={() => onMoveLayer(layer.id, "up")}
                     disabled={index === 0}
                     aria-label="Move layer up"
@@ -123,7 +123,7 @@ export function LayersPanel({
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100"
+                    className="h-7 w-7 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     onClick={() => onMoveLayer(layer.id, "down")}
                     disabled={index === orderedLayers.length - 1}
                     aria-label="Move layer down"

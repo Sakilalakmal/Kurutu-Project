@@ -6,13 +6,14 @@ import { MarkerType, type Node } from "@xyflow/react";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { applyEdgeStyle } from "@/lib/diagram/edges";
 import {
   DiagramApiError,
   fetchDiagramPageForViewer,
 } from "@/lib/diagram/api";
 import { isLayerLocked, sortLayers } from "@/lib/diagram/layers";
 import { toFlowEdges, toFlowNodes, type EditorEdge, type EditorNodeData } from "@/lib/diagram/mapper";
-import type { DiagramEdgeType, DiagramPage, DiagramViewport } from "@/lib/diagram/types";
+import type { DiagramPage, DiagramViewport } from "@/lib/diagram/types";
 
 type ViewerShellProps = {
   diagramId: string;
@@ -178,15 +179,12 @@ export function ViewerShell({ diagramId, pageId }: ViewerShellProps) {
       });
   }, [page, visibleNodes]);
 
-  const defaultEdgeType = useMemo<DiagramEdgeType>(() => {
-    if (!page) {
-      return "smoothstep";
-    }
-
-    return page.edges.some((edge) => edge.type === "straight")
-      ? "straight"
-      : "smoothstep";
-  }, [page]);
+  const edgeStyle = page?.settings.edgeStyle ?? "smoothstep";
+  const edgeAnimated = page?.settings.edgeAnimated ?? false;
+  const styledEdges = useMemo(
+    () => applyEdgeStyle(visibleEdges, edgeStyle, edgeAnimated),
+    [edgeAnimated, edgeStyle, visibleEdges]
+  );
 
   if (isLoading) {
     return (
@@ -222,13 +220,14 @@ export function ViewerShell({ diagramId, pageId }: ViewerShellProps) {
         <div className="min-h-0 flex-1 p-4">
           <EditorCanvas
             nodes={visibleNodes}
-            edges={visibleEdges}
+            edges={styledEdges}
             activeTool="select"
             readOnly
             gridVisible
             snapEnabled={false}
             gridSize={10}
-            defaultEdgeType={defaultEdgeType}
+            edgeStyle={edgeStyle}
+            edgeAnimated={edgeAnimated}
             initialViewport={viewport}
             onNodesChange={() => undefined}
             onEdgesChange={() => undefined}

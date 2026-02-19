@@ -3,13 +3,17 @@
 import {
   Check,
   Copy,
+  GitBranch,
   Image as ImageIcon,
   MessageSquare,
+  Moon,
   Save,
   Share2,
   Sparkles,
+  Sun,
   WandSparkles,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { PageSwitcher } from "@/components/editor/PageSwitcher";
 import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -36,6 +40,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { EDGE_STYLE_LABELS, EDGE_STYLE_OPTIONS, toStoredEdgeStyle } from "@/lib/diagram/edges";
+import type { DiagramEdgeType } from "@/lib/diagram/types";
 import { cn } from "@/lib/utils";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -59,6 +65,10 @@ type EditorTopbarProps = {
   onExportSvg: () => void;
   exportBackground: ExportBackground;
   onExportBackgroundChange: (value: ExportBackground) => void;
+  edgeStyle: DiagramEdgeType;
+  onEdgeStyleChange: (value: DiagramEdgeType) => void;
+  edgeAnimated: boolean;
+  onEdgeAnimatedChange: (value: boolean) => void;
   isExportingPng: boolean;
   isExportingSvg: boolean;
   shareUrl: string | null;
@@ -108,6 +118,10 @@ export function EditorTopbar({
   onExportSvg,
   exportBackground,
   onExportBackgroundChange,
+  edgeStyle,
+  onEdgeStyleChange,
+  edgeAnimated,
+  onEdgeAnimatedChange,
   isExportingPng,
   isExportingSvg,
   shareUrl,
@@ -118,15 +132,18 @@ export function EditorTopbar({
   isCopyShareSuccess,
 }: EditorTopbarProps) {
   const disableExport = !activePageId || isPageDisabled;
+  const disableEdgeControls = !activePageId || isPageDisabled;
+  const { theme, setTheme } = useTheme();
+  const isDarkTheme = theme === "dark";
 
   return (
     <TooltipProvider>
-      <header className="flex h-16 items-center gap-3 border-b border-zinc-200/80 bg-white/80 px-3 backdrop-blur sm:px-5">
+      <header className="flex h-16 items-center gap-3 border-b border-zinc-200/80 bg-white/80 px-3 backdrop-blur dark:border-zinc-800/80 dark:bg-zinc-950/80 sm:px-5">
         <input
           value={title}
           onChange={(event) => onTitleChange(event.target.value)}
           aria-label="Diagram title"
-          className="h-9 w-[180px] rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-zinc-900 outline-none transition-colors focus:border-zinc-300 focus:bg-white sm:w-[240px] lg:w-[320px]"
+          className="h-9 w-[180px] rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-zinc-900 outline-none transition-colors focus:border-zinc-300 focus:bg-white dark:text-zinc-100 dark:focus:border-zinc-700 dark:focus:bg-zinc-900 sm:w-[240px] lg:w-[320px]"
         />
         <div className="hidden lg:block">
           <PageSwitcher
@@ -141,14 +158,14 @@ export function EditorTopbar({
         <span
           className={cn(
             "hidden text-xs xl:inline",
-            saveStatus === "error" ? "text-red-600" : "text-zinc-500"
+            saveStatus === "error" ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"
           )}
         >
           {formatSaveMeta(saveStatus, lastSavedAt)}
         </span>
 
         {isDirty ? (
-          <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 xl:inline">
+          <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200 xl:inline">
             Unsaved changes
           </span>
         ) : null}
@@ -159,7 +176,7 @@ export function EditorTopbar({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5"
+                className="h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                 onClick={onOpenTemplates}
                 aria-label="Open templates"
                 disabled={isPageDisabled}
@@ -171,7 +188,7 @@ export function EditorTopbar({
             <TooltipContent side="bottom">Create a new page from template</TooltipContent>
           </Tooltip>
 
-          <ButtonGroup className="hidden overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] md:flex">
+          <ButtonGroup className="hidden overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] dark:border-zinc-700 dark:bg-zinc-900 md:flex">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -179,7 +196,7 @@ export function EditorTopbar({
                   variant="ghost"
                   onClick={onExportPng}
                   disabled={disableExport || isExportingPng}
-                  className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5"
+                  className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5 dark:text-zinc-200"
                   aria-label="Export PNG"
                 >
                   <ImageIcon className="size-4" />
@@ -195,7 +212,7 @@ export function EditorTopbar({
                   variant="ghost"
                   onClick={onExportSvg}
                   disabled={disableExport || isExportingSvg}
-                  className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5"
+                  className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5 dark:text-zinc-200"
                   aria-label="Export SVG"
                 >
                   <Sparkles className="size-4" />
@@ -211,8 +228,58 @@ export function EditorTopbar({
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5"
+                      className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5 dark:text-zinc-200"
+                      aria-label="Connector style"
+                      disabled={disableEdgeControls}
+                    >
+                      <GitBranch className="size-4" />
+                      Connector
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Set connector style</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup
+                  value={edgeStyle}
+                  onValueChange={(value) => onEdgeStyleChange(toStoredEdgeStyle(value))}
+                >
+                  {EDGE_STYLE_OPTIONS.map((option) => (
+                    <DropdownMenuRadioItem key={option} value={option}>
+                      {EDGE_STYLE_LABELS[option]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onEdgeAnimatedChange(!edgeAnimated)}
+                  disabled={disableEdgeControls}
+                  className={cn(
+                    "h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5 dark:text-zinc-200",
+                    edgeAnimated && "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-200 dark:text-zinc-900"
+                  )}
+                  aria-label="Toggle animated connectors"
+                >
+                  Animated
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Toggle connector animation</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 rounded-none px-2.5 text-zinc-700 transition-transform duration-200 hover:-translate-y-0.5 dark:text-zinc-200"
                       aria-label="Export background"
+                      disabled={disableExport}
                     >
                       BG
                     </Button>
@@ -238,6 +305,27 @@ export function EditorTopbar({
             </DropdownMenu>
           </ButtonGroup>
 
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                className="h-8 w-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                onClick={() => setTheme(isDarkTheme ? "light" : "dark")}
+                aria-label="Toggle theme"
+              >
+                {isDarkTheme ? (
+                  <Sun className="size-4" />
+                ) : (
+                  <Moon className="size-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {isDarkTheme ? "Switch to light mode" : "Switch to dark mode"}
+            </TooltipContent>
+          </Tooltip>
+
           <Popover>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -245,7 +333,7 @@ export function EditorTopbar({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5"
+                    className="h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                     aria-label="Share diagram"
                     disabled={!shareUrl}
                   >
@@ -256,14 +344,17 @@ export function EditorTopbar({
               </TooltipTrigger>
               <TooltipContent side="bottom">Toggle public link</TooltipContent>
             </Tooltip>
-            <PopoverContent align="end" className="w-[320px] space-y-4">
+            <PopoverContent
+              align="end"
+              className="w-[320px] space-y-4 border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+            >
               <PopoverHeader>
                 <PopoverTitle>Share Link</PopoverTitle>
               </PopoverHeader>
-              <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+              <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
                 <div>
-                  <p className="text-sm font-medium text-zinc-900">Public access</p>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Public access</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
                     Anyone with the link can view this page.
                   </p>
                 </div>
@@ -330,7 +421,7 @@ export function EditorTopbar({
           <Button
             size="icon-sm"
             variant="outline"
-            className="h-8 w-8 rounded-lg border-zinc-200 bg-white lg:hidden"
+            className="h-8 w-8 rounded-lg border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 lg:hidden"
             aria-label="Open chat panel"
             onClick={onOpenMobileChat}
           >

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng, toSvg } from "html-to-image";
 import {
-  MarkerType,
   addEdge,
   type Connection,
   type Node,
@@ -11,7 +10,7 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { useEdgesState, useNodesState } from "@xyflow/react";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import { EditorBottomControls } from "@/components/editor/editor-bottom-controls";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
@@ -30,10 +29,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
+import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAssetById } from "@/lib/assets/catalog";
 import { applyTemplate, createNodeFromAsset } from "@/lib/assets/builders";
 import { getTemplateById, TEMPLATE_LIBRARY } from "@/lib/assets/templates";
+import { applyEdgeStyle, EDGE_STYLE_OPTIONS, toRuntimeEdgeType } from "@/lib/diagram/edges";
 import {
   DiagramApiError,
   fetchDiagramById,
@@ -82,6 +83,7 @@ import type {
   DiagramLayer,
   DiagramNodeType,
   DiagramPage,
+  DiagramSettings,
   DiagramViewport,
   EditorTool,
 } from "@/lib/diagram/types";
@@ -186,7 +188,8 @@ export function EditorShell({
   const [gridVisible, setGridVisible] = useState(true);
   const [snapEnabled, setSnapEnabled] = useState(DEFAULT_SETTINGS.snapEnabled);
   const [gridSize, setGridSize] = useState(DEFAULT_GRID_SIZE);
-  const [defaultEdgeType, setDefaultEdgeType] = useState<DiagramEdgeType>("smoothstep");
+  const [edgeStyle, setEdgeStyle] = useState<DiagramEdgeType>(DEFAULT_SETTINGS.edgeStyle);
+  const [edgeAnimated, setEdgeAnimated] = useState(DEFAULT_SETTINGS.edgeAnimated);
   const [activeTool, setActiveTool] = useState<EditorTool>("select");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -231,6 +234,8 @@ export function EditorShell({
   const viewportRef = useRef(viewport);
   const snapEnabledRef = useRef(snapEnabled);
   const gridSizeRef = useRef(gridSize);
+  const edgeStyleRef = useRef(edgeStyle);
+  const edgeAnimatedRef = useRef(edgeAnimated);
   const pagesRef = useRef(pages);
   const activePageIdRef = useRef(activePageId);
   const layersRef = useRef(layers);
@@ -255,6 +260,14 @@ export function EditorShell({
   useEffect(() => {
     gridSizeRef.current = gridSize;
   }, [gridSize]);
+
+  useEffect(() => {
+    edgeStyleRef.current = edgeStyle;
+  }, [edgeStyle]);
+
+  useEffect(() => {
+    edgeAnimatedRef.current = edgeAnimated;
+  }, [edgeAnimated]);
 
   useEffect(() => {
     pagesRef.current = pages;
@@ -307,18 +320,24 @@ export function EditorShell({
     [getActiveHistory]
   );
 
+  const buildRuntimeSettings = useCallback(
+    (overrides?: Partial<DiagramSettings>): DiagramSettings => ({
+      snapEnabled: overrides?.snapEnabled ?? snapEnabledRef.current,
+      gridSize: overrides?.gridSize ?? gridSizeRef.current,
+      edgeStyle: overrides?.edgeStyle ?? edgeStyleRef.current,
+      edgeAnimated: overrides?.edgeAnimated ?? edgeAnimatedRef.current,
+    }),
+    []
+  );
+
   const buildSnapshot = useCallback(
     (overrides?: Partial<DiagramSnapshot>): DiagramSnapshot => ({
       nodes: overrides?.nodes ?? nodesRef.current,
       edges: overrides?.edges ?? edgesRef.current,
       viewport: overrides?.viewport ?? viewportRef.current,
-      settings:
-        overrides?.settings ?? {
-          snapEnabled: snapEnabledRef.current,
-          gridSize: gridSizeRef.current,
-        },
+      settings: overrides?.settings ?? buildRuntimeSettings(),
     }),
-    []
+    [buildRuntimeSettings]
   );
 
   const pushHistorySnapshot = useCallback(
@@ -383,7 +402,11 @@ export function EditorShell({
           handleNodeTextChange,
           showLayerLockedToast
         ),
-        edges: toFlowEdges(normalizedPage.edges),
+        edges: applyEdgeStyle(
+          toFlowEdges(normalizedPage.edges),
+          normalizedPage.settings.edgeStyle,
+          normalizedPage.settings.edgeAnimated
+        ),
         viewport: normalizedPage.viewport,
         settings: normalizedPage.settings,
       };
@@ -395,10 +418,11 @@ export function EditorShell({
     (snapshot: DiagramSnapshot) => {
       isRestoringHistoryRef.current = true;
 
-      const normalizedEdges = snapshot.edges.map((edge) => ({
-        ...edge,
-        markerEnd: { type: MarkerType.ArrowClosed },
-      }));
+      const normalizedEdges = applyEdgeStyle(
+        snapshot.edges,
+        snapshot.settings.edgeStyle,
+        snapshot.settings.edgeAnimated
+      );
 
       setNodes(snapshot.nodes);
       setEdges(normalizedEdges);
@@ -406,6 +430,8 @@ export function EditorShell({
       setCanvasViewport(snapshot.viewport);
       setSnapEnabled(snapshot.settings.snapEnabled);
       setGridSize(snapshot.settings.gridSize);
+      setEdgeStyle(snapshot.settings.edgeStyle);
+      setEdgeAnimated(snapshot.settings.edgeAnimated);
       void flowInstance?.setViewport(snapshot.viewport, { duration: 0 });
 
       Promise.resolve().then(() => {
@@ -445,7 +471,11 @@ export function EditorShell({
         handleNodeTextChange,
         showLayerLockedToast
       );
-      const flowEdges = toFlowEdges(normalizedPage.edges);
+      const flowEdges = applyEdgeStyle(
+        toFlowEdges(normalizedPage.edges),
+        normalizedPage.settings.edgeStyle,
+        normalizedPage.settings.edgeAnimated
+      );
       const sortedLayers = sortLayers(normalizedPage.layers);
       const resolvedActiveLayerId = resolveActiveLayerId(
         sortedLayers,
@@ -458,13 +488,10 @@ export function EditorShell({
       setCanvasViewport(normalizedPage.viewport);
       setSnapEnabled(normalizedPage.settings.snapEnabled);
       setGridSize(normalizedPage.settings.gridSize);
+      setEdgeStyle(normalizedPage.settings.edgeStyle);
+      setEdgeAnimated(normalizedPage.settings.edgeAnimated);
       setLayers(sortedLayers);
       setActiveLayerId(resolvedActiveLayerId);
-      setDefaultEdgeType(
-        flowEdges.find((edge) => edge.type === "straight")?.type === "straight"
-          ? "straight"
-          : "smoothstep"
-      );
     },
     [handleNodeTextChange, setEdges, setNodes, showLayerLockedToast]
   );
@@ -484,6 +511,8 @@ export function EditorShell({
       settings: {
         snapEnabled: snapEnabledRef.current,
         gridSize: gridSizeRef.current,
+        edgeStyle: edgeStyleRef.current,
+        edgeAnimated: edgeAnimatedRef.current,
       },
       layers: normalizedLayers,
       activeLayerId: resolveActiveLayerId(
@@ -649,7 +678,7 @@ export function EditorShell({
   );
 
   const visibleEdges = useMemo(() => {
-    return edges
+    const filteredEdges = edges
       .filter(
         (edge) =>
           !hiddenLayerIds.has(edge.layerId) &&
@@ -661,11 +690,12 @@ export function EditorShell({
 
         return {
           ...edge,
-          markerEnd: { type: MarkerType.ArrowClosed },
           zIndex: (layerOrder + 1) * 10 - 1,
         };
       });
-  }, [edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]);
+
+    return applyEdgeStyle(filteredEdges, edgeStyle, edgeAnimated);
+  }, [edgeAnimated, edgeStyle, edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]);
 
   const normalizedTitle = title.trim() || "Untitled Diagram";
 
@@ -738,6 +768,7 @@ export function EditorShell({
       style: {
         width: `${width}px`,
         height: `${height}px`,
+        transformOrigin: "top left",
         transform: `translate(${EXPORT_PADDING - exportBounds.x}px, ${
           EXPORT_PADDING - exportBounds.y
         }px)`,
@@ -746,7 +777,26 @@ export function EditorShell({
   }, [exportBackground, exportBounds]);
 
   const getViewportElement = useCallback(() => {
-    return document.querySelector(".react-flow__viewport") as HTMLElement | null;
+    const canvasContainer = canvasContainerRef.current;
+
+    if (!canvasContainer) {
+      return null;
+    }
+
+    const viewport = canvasContainer.querySelector(".react-flow__viewport") as HTMLElement | null;
+
+    if (viewport) {
+      return viewport;
+    }
+
+    const edgesLayer = canvasContainer.querySelector(".react-flow__edges");
+    const nodesLayer = canvasContainer.querySelector(".react-flow__nodes");
+
+    if (!edgesLayer || !nodesLayer) {
+      return null;
+    }
+
+    return (edgesLayer.parentElement as HTMLElement | null) ?? null;
   }, []);
 
   const handleExportPng = useCallback(async () => {
@@ -874,6 +924,8 @@ export function EditorShell({
       settings: {
         snapEnabled,
         gridSize,
+        edgeStyle,
+        edgeAnimated,
       },
       layers: normalizedLayers,
       activeLayerId: resolvedLayerId,
@@ -893,6 +945,8 @@ export function EditorShell({
     activePageId,
     activePageName,
     edges,
+    edgeAnimated,
+    edgeStyle,
     gridSize,
     layers,
     nodes,
@@ -1177,6 +1231,8 @@ export function EditorShell({
       settings: {
         snapEnabled: snapEnabledRef.current,
         gridSize: gridSizeRef.current,
+        edgeStyle: edgeStyleRef.current,
+        edgeAnimated: edgeAnimatedRef.current,
       },
       viewport: { ...DEFAULT_VIEWPORT },
     });
@@ -1207,6 +1263,8 @@ export function EditorShell({
         settings: {
           snapEnabled: snapEnabledRef.current,
           gridSize: gridSizeRef.current,
+          edgeStyle: edgeStyleRef.current,
+          edgeAnimated: edgeAnimatedRef.current,
         },
         viewport: { ...DEFAULT_VIEWPORT },
       });
@@ -1256,8 +1314,8 @@ export function EditorShell({
         const nextEdges = addEdge(
           {
             ...connection,
-            type: defaultEdgeType,
-            markerEnd: { type: MarkerType.ArrowClosed },
+            type: toRuntimeEdgeType(edgeStyleRef.current),
+            animated: edgeAnimatedRef.current,
             layerId: edgeLayerId,
           },
           currentEdges
@@ -1268,7 +1326,49 @@ export function EditorShell({
         return nextEdges;
       });
     },
-    [defaultEdgeType, pushHistorySnapshot, setEdges, showLayerLockedToast]
+    [pushHistorySnapshot, setEdges, showLayerLockedToast]
+  );
+
+  const handleEdgeStyleChange = useCallback(
+    (nextStyle: DiagramEdgeType) => {
+      if (!EDGE_STYLE_OPTIONS.includes(nextStyle) || nextStyle === edgeStyleRef.current) {
+        return;
+      }
+
+      setEdgeStyle(nextStyle);
+      setEdges((currentEdges) => {
+        const nextEdges = applyEdgeStyle(currentEdges, nextStyle, edgeAnimatedRef.current);
+        pushHistorySnapshot({
+          edges: nextEdges,
+          settings: buildRuntimeSettings({
+            edgeStyle: nextStyle,
+          }),
+        });
+        return nextEdges;
+      });
+    },
+    [buildRuntimeSettings, pushHistorySnapshot, setEdges]
+  );
+
+  const handleEdgeAnimatedToggle = useCallback(
+    (nextAnimated: boolean) => {
+      if (nextAnimated === edgeAnimatedRef.current) {
+        return;
+      }
+
+      setEdgeAnimated(nextAnimated);
+      setEdges((currentEdges) => {
+        const nextEdges = applyEdgeStyle(currentEdges, edgeStyleRef.current, nextAnimated);
+        pushHistorySnapshot({
+          edges: nextEdges,
+          settings: buildRuntimeSettings({
+            edgeAnimated: nextAnimated,
+          }),
+        });
+        return nextEdges;
+      });
+    },
+    [buildRuntimeSettings, pushHistorySnapshot, setEdges]
   );
 
   const resolveInsertionLayer = useCallback(() => {
@@ -1608,9 +1708,9 @@ export function EditorShell({
 
   return (
     <>
-      <main className="h-dvh w-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(46,58,80,0.55),rgba(15,23,42,0.98)_60%)]">
-        <div className="flex h-full w-full overflow-hidden border border-[#1f2937] bg-[#060a13] p-1">
-          <section className="flex min-h-0 w-full flex-col overflow-hidden bg-[#edf1f4]">
+      <main className="h-dvh w-full overflow-hidden bg-[radial-gradient(circle_at_top,rgba(191,219,254,0.45),rgba(241,245,249,0.96)_60%)] dark:bg-[radial-gradient(circle_at_top,rgba(46,58,80,0.55),rgba(15,23,42,0.98)_60%)]">
+        <div className="flex h-full w-full overflow-hidden border border-slate-300/80 bg-slate-100 p-1 dark:border-[#1f2937] dark:bg-[#060a13]">
+          <section className="flex min-h-0 w-full flex-col overflow-hidden bg-[#edf1f4] dark:bg-[#0f1724]">
             <EditorTopbar
               title={title}
               onTitleChange={setTitle}
@@ -1629,6 +1729,10 @@ export function EditorShell({
               onExportSvg={handleExportSvg}
               exportBackground={exportBackground}
               onExportBackgroundChange={setExportBackground}
+              edgeStyle={edgeStyle}
+              onEdgeStyleChange={handleEdgeStyleChange}
+              edgeAnimated={edgeAnimated}
+              onEdgeAnimatedChange={handleEdgeAnimatedToggle}
               isExportingPng={isExportingPng}
               isExportingSvg={isExportingSvg}
               shareUrl={shareUrl}
@@ -1646,8 +1750,8 @@ export function EditorShell({
               />
               <div ref={canvasContainerRef} className="relative min-w-0 flex-1">
                 {isLoading ? (
-                  <div className="flex h-full w-full items-center justify-center rounded-2xl border border-zinc-200 bg-white">
-                    <Spinner className="size-5 text-zinc-500" />
+                  <div className="flex h-full w-full items-center justify-center rounded-2xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+                    <Spinner className="size-5 text-zinc-500 dark:text-zinc-300" />
                   </div>
                 ) : (
                   <>
@@ -1660,7 +1764,8 @@ export function EditorShell({
                       snapEnabled={snapEnabled}
                       gridSize={gridSize}
                       snapGuides={snapGuides}
-                      defaultEdgeType={defaultEdgeType}
+                      edgeStyle={edgeStyle}
+                      edgeAnimated={edgeAnimated}
                       initialViewport={canvasViewport}
                       onNodesChange={handleNodesChange}
                       onEdgesChange={rawOnEdgesChange}
@@ -1680,7 +1785,7 @@ export function EditorShell({
                       canRedo={canRedo}
                       gridVisible={gridVisible}
                       snapEnabled={snapEnabled}
-                      defaultEdgeType={defaultEdgeType}
+                      defaultEdgeType={edgeStyle}
                       onUndo={handleUndo}
                       onRedo={handleRedo}
                       onZoomIn={handleZoomIn}
@@ -1692,18 +1797,20 @@ export function EditorShell({
                           const nextSnapEnabled = !current;
 
                           pushHistorySnapshot({
-                            settings: {
+                            settings: buildRuntimeSettings({
                               snapEnabled: nextSnapEnabled,
-                              gridSize: gridSizeRef.current,
-                            },
+                            }),
                           });
 
                           return nextSnapEnabled;
                         });
                       }}
                       onToggleEdgeType={() =>
-                        setDefaultEdgeType((current) =>
-                          current === "smoothstep" ? "straight" : "smoothstep"
+                        handleEdgeStyleChange(
+                          EDGE_STYLE_OPTIONS[
+                            (EDGE_STYLE_OPTIONS.indexOf(edgeStyle) + 1) %
+                              EDGE_STYLE_OPTIONS.length
+                          ]
                         )
                       }
                     />
@@ -1712,7 +1819,7 @@ export function EditorShell({
               </div>
               <aside className="hidden w-[320px] shrink-0 lg:block">
                 <Tabs defaultValue="chat" className="h-full">
-                  <TabsList className="grid w-full grid-cols-2 bg-zinc-100">
+                  <TabsList className="grid w-full grid-cols-2 bg-zinc-100 dark:bg-zinc-900">
                     <TabsTrigger value="chat">Chat</TabsTrigger>
                     <TabsTrigger value="layers">Layers</TabsTrigger>
                   </TabsList>
@@ -1739,7 +1846,10 @@ export function EditorShell({
       </main>
 
       <Sheet open={isMobileChatOpen} onOpenChange={setIsMobileChatOpen}>
-        <SheetContent side="right" className="w-[92vw] max-w-sm border-zinc-200 bg-[#edf1f4] p-3">
+        <SheetContent
+          side="right"
+          className="w-[92vw] max-w-sm border-zinc-200 bg-[#edf1f4] p-3 dark:border-zinc-800 dark:bg-[#0f1724]"
+        >
           <SheetHeader className="px-1 pb-2">
             <SheetTitle>Chat</SheetTitle>
           </SheetHeader>

@@ -34,7 +34,7 @@ export function PageSwitcher({
       >
         <SelectTrigger
           size="sm"
-          className="h-9 min-w-[160px] border-zinc-200 bg-white text-zinc-700"
+          className="h-9 min-w-[160px] border-zinc-200 bg-white text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
           aria-label="Select page"
         >
           <SelectValue placeholder="Select page" />
@@ -51,7 +51,7 @@ export function PageSwitcher({
         size="sm"
         variant="outline"
         onClick={onAddPage}
-        className="h-9 border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+        className="h-9 border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
         disabled={disabled}
       >
         <Plus className="size-4" />

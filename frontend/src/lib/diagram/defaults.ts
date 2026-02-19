@@ -23,6 +23,8 @@ export const DEFAULT_GRID_SIZE = 10;
 export const DEFAULT_SETTINGS: DiagramSettings = {
   snapEnabled: true,
   gridSize: DEFAULT_GRID_SIZE,
+  edgeStyle: "smoothstep",
+  edgeAnimated: false,
 };
 
 const DEFAULT_NODE_STYLES: Record<DiagramNodeType, DiagramNodeStyle> = {
