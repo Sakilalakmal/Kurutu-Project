@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { createEmptyDiagramDocument } from "@/lib/diagram/defaults";
-import { diagramDocumentSchema } from "@/lib/diagram/types";
+import { migrateDiagramData } from "@/lib/diagram/migrate";
 
 const getUserIdFromSession = async () => {
   const session = await getServerSession();
@@ -34,8 +34,7 @@ export async function GET() {
     });
   }
 
-  const parsedData = diagramDocumentSchema.safeParse(diagram.data);
-  const data = parsedData.success ? parsedData.data : createEmptyDiagramDocument();
+  const data = migrateDiagramData(diagram.data);
 
   return NextResponse.json({
     diagram: {

@@ -1,6 +1,7 @@
 "use client";
 
 import { MessageSquare, Save } from "lucide-react";
+import { PageSwitcher } from "@/components/editor/PageSwitcher";
 import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,11 @@ type EditorTopbarProps = {
   saveStatus: SaveStatus;
   lastSavedAt: string | null;
   isDirty: boolean;
+  pages: Array<{ id: string; name: string }>;
+  activePageId: string | null;
+  onPageChange: (pageId: string) => void;
+  onAddPage: () => void;
+  isPageDisabled?: boolean;
   onOpenMobileChat: () => void;
 };
 
@@ -45,6 +51,11 @@ export function EditorTopbar({
   saveStatus,
   lastSavedAt,
   isDirty,
+  pages,
+  activePageId,
+  onPageChange,
+  onAddPage,
+  isPageDisabled,
   onOpenMobileChat,
 }: EditorTopbarProps) {
   return (
@@ -55,6 +66,15 @@ export function EditorTopbar({
         aria-label="Diagram title"
         className="h-9 w-[220px] rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-zinc-900 outline-none transition-colors focus:border-zinc-300 focus:bg-white sm:w-[320px]"
       />
+      <div className="hidden lg:block">
+        <PageSwitcher
+          pages={pages}
+          activePageId={activePageId}
+          onPageChange={onPageChange}
+          onAddPage={onAddPage}
+          disabled={isPageDisabled}
+        />
+      </div>
 
       <span
         className={cn(

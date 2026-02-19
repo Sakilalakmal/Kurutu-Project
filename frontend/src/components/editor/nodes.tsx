@@ -31,6 +31,7 @@ function EditableShapeNode({
     () => (kind === "sticky" ? "font-medium text-[13px]" : "text-sm"),
     [kind]
   );
+  const isLocked = data.isLocked;
 
   const commitText = () => {
     const nextText = draftText.trim();
@@ -54,6 +55,11 @@ function EditableShapeNode({
         color: data.style.textColor,
       }}
       onDoubleClick={() => {
+        if (isLocked) {
+          data.onLockedInteraction();
+          return;
+        }
+
         setDraftText(data.text);
         setIsEditing(true);
       }}
@@ -61,12 +67,18 @@ function EditableShapeNode({
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-zinc-400 transition-colors duration-150"
+        className={cn(
+          "!h-2.5 !w-2.5 !border-2 !border-white transition-colors duration-150",
+          isLocked ? "!bg-zinc-300" : "!bg-zinc-400"
+        )}
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-2 !border-white !bg-zinc-400 transition-colors duration-150"
+        className={cn(
+          "!h-2.5 !w-2.5 !border-2 !border-white transition-colors duration-150",
+          isLocked ? "!bg-zinc-300" : "!bg-zinc-400"
+        )}
       />
       {shouldRenderStickyAccent ? (
         <span
