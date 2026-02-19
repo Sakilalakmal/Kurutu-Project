@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { migrateDiagramData } from "@/lib/diagram/migrate";
 import { updateDiagramPayloadSchema } from "@/lib/diagram/types";
 
 const getUserIdFromSession = async () => {
@@ -16,6 +17,37 @@ const resolveParams = async (
 
   return params.id;
 };
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ id: string }> | { id: string } }
+) {
+  const userId = await getUserIdFromSession();
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const diagramId = await resolveParams(context.params);
+  const diagram = await prisma.diagram.findUnique({
+    where: { id: diagramId },
+  });
+
+  if (!diagram || diagram.userId !== userId) {
+    return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    diagram: {
+      id: diagram.id,
+      title: diagram.title,
+      isPublic: diagram.isPublic,
+      data: migrateDiagramData(diagram.data),
+      createdAt: diagram.createdAt,
+      updatedAt: diagram.updatedAt,
+    },
+  });
+}
 
 export async function PUT(
   request: Request,
@@ -64,6 +96,7 @@ export async function PUT(
     diagram: {
       id: updatedDiagram.id,
       title: updatedDiagram.title,
+      isPublic: updatedDiagram.isPublic,
       data: parsedPayload.data.data,
       createdAt: updatedDiagram.createdAt,
       updatedAt: updatedDiagram.updatedAt,

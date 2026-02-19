@@ -1,9 +1,14 @@
 import { z } from "zod";
-import { diagramDocumentSchema, updateDiagramPayloadSchema } from "@/lib/diagram/types";
+import {
+  diagramDocumentSchema,
+  diagramPageSchema,
+  updateDiagramPayloadSchema,
+} from "@/lib/diagram/types";
 
 const diagramDtoSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
+  isPublic: z.boolean(),
   data: diagramDocumentSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -15,7 +20,36 @@ const latestDiagramResponseSchema = z.object({
 
 type DiagramDto = z.infer<typeof diagramDtoSchema>;
 
-const extractErrorMessage = async (response: Response) => {
+const diagramMetaSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  isPublic: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const shareResponseSchema = z.object({
+  diagram: diagramMetaSchema,
+});
+
+const viewerPageResponseSchema = z.object({
+  diagramId: z.string().min(1),
+  title: z.string(),
+  isPublic: z.boolean(),
+  isOwner: z.boolean(),
+  page: diagramPageSchema,
+});
+
+class DiagramApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const extractErrorMessage = async (response: Response): Promise<string> => {
   try {
     const body = (await response.json()) as { error?: string };
 
@@ -32,7 +66,26 @@ export const fetchLatestDiagram = async (): Promise<DiagramDto> => {
   });
 
   if (!response.ok) {
-    throw new Error(await extractErrorMessage(response));
+    throw new DiagramApiError(await extractErrorMessage(response), response.status);
+  }
+
+  const parsed = latestDiagramResponseSchema.safeParse(await response.json());
+
+  if (!parsed.success) {
+    throw new Error("Invalid response while loading diagram.");
+  }
+
+  return parsed.data.diagram;
+};
+
+export const fetchDiagramById = async (diagramId: string): Promise<DiagramDto> => {
+  const response = await fetch(`/api/diagrams/${diagramId}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new DiagramApiError(await extractErrorMessage(response), response.status);
   }
 
   const parsed = latestDiagramResponseSchema.safeParse(await response.json());
@@ -62,7 +115,7 @@ export const updateDiagram = async ({
   });
 
   if (!response.ok) {
-    throw new Error(await extractErrorMessage(response));
+    throw new DiagramApiError(await extractErrorMessage(response), response.status);
   }
 
   const parsed = latestDiagramResponseSchema.safeParse(await response.json());
@@ -74,4 +127,58 @@ export const updateDiagram = async ({
   return parsed.data.diagram;
 };
 
+export const updateDiagramShare = async ({
+  diagramId,
+  isPublic,
+}: {
+  diagramId: string;
+  isPublic: boolean;
+}) => {
+  const response = await fetch(`/api/diagrams/${diagramId}/share`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ isPublic }),
+  });
+
+  if (!response.ok) {
+    throw new DiagramApiError(await extractErrorMessage(response), response.status);
+  }
+
+  const parsed = shareResponseSchema.safeParse(await response.json());
+
+  if (!parsed.success) {
+    throw new Error("Invalid response while updating sharing.");
+  }
+
+  return parsed.data.diagram;
+};
+
+export const fetchDiagramPageForViewer = async ({
+  diagramId,
+  pageId,
+}: {
+  diagramId: string;
+  pageId: string;
+}) => {
+  const response = await fetch(`/api/diagrams/${diagramId}/page/${pageId}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new DiagramApiError(await extractErrorMessage(response), response.status);
+  }
+
+  const parsed = viewerPageResponseSchema.safeParse(await response.json());
+
+  if (!parsed.success) {
+    throw new Error("Invalid response while loading viewer.");
+  }
+
+  return parsed.data;
+};
+
 export type { DiagramDto };
+export { DiagramApiError };

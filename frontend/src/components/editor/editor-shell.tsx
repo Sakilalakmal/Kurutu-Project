@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toPng, toSvg } from "html-to-image";
 import {
   MarkerType,
   addEdge,
@@ -15,7 +16,11 @@ import { EditorBottomControls } from "@/components/editor/editor-bottom-controls
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
-import { EditorTopbar, type SaveStatus } from "@/components/editor/editor-topbar";
+import {
+  EditorTopbar,
+  type ExportBackground,
+  type SaveStatus,
+} from "@/components/editor/editor-topbar";
 import { LayersPanel } from "@/components/editor/LayersPanel";
 import {
   Sheet,
@@ -25,7 +30,13 @@ import {
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fetchLatestDiagram, updateDiagram } from "@/lib/diagram/api";
+import {
+  DiagramApiError,
+  fetchDiagramById,
+  fetchLatestDiagram,
+  updateDiagram,
+  updateDiagramShare,
+} from "@/lib/diagram/api";
 import {
   createDefaultNodeRecord,
   DEFAULT_GRID_SIZE,
@@ -65,6 +76,8 @@ import type {
 } from "@/lib/diagram/types";
 
 const AUTOSAVE_DELAY_MS = 800;
+const EXPORT_PADDING = 48;
+const PNG_EXPORT_SCALE = 3;
 
 const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -72,6 +85,13 @@ const createNodeId = () =>
     : `node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const createLayerName = (count: number) => `Layer ${count + 1}`;
+
+const sanitizeFileName = (value: string) =>
+  value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120) || "diagram";
 
 const isPlaceableNodeTool = (tool: EditorTool): tool is DiagramNodeType =>
   tool === "rectangle" || tool === "ellipse" || tool === "sticky";
@@ -91,9 +111,14 @@ const isEditableTarget = (target: EventTarget | null) => {
   );
 };
 
-export function EditorShell() {
+export function EditorShell({
+  initialDiagramId = null,
+}: {
+  initialDiagramId?: string | null;
+}) {
   const [diagramId, setDiagramId] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled Diagram");
+  const [isPublic, setIsPublic] = useState(false);
   const [pages, setPages] = useState<DiagramPage[]>([]);
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const [layers, setLayers] = useState<DiagramLayer[]>([]);
@@ -110,6 +135,12 @@ export function EditorShell() {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [exportBackground, setExportBackground] =
+    useState<ExportBackground>("transparent");
+  const [isExportingPng, setIsExportingPng] = useState(false);
+  const [isExportingSvg, setIsExportingSvg] = useState(false);
+  const [isUpdatingShare, setIsUpdatingShare] = useState(false);
+  const [isCopyShareSuccess, setIsCopyShareSuccess] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [flowInstance, setFlowInstance] = useState<
@@ -129,6 +160,7 @@ export function EditorShell() {
   const previousSignatureRef = useRef<string>("");
   const changeVersionRef = useRef(0);
   const emptyDocumentRef = useRef(createEmptyDiagramDocument());
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -411,7 +443,22 @@ export function EditorShell() {
 
     const loadDiagram = async () => {
       try {
-        const diagram = await fetchLatestDiagram();
+        let diagram;
+
+        if (initialDiagramId) {
+          try {
+            diagram = await fetchDiagramById(initialDiagramId);
+          } catch (error) {
+            if (error instanceof DiagramApiError && error.status === 404) {
+              toast.error("Requested diagram was not found. Loading your latest diagram instead.");
+              diagram = await fetchLatestDiagram();
+            } else {
+              throw error;
+            }
+          }
+        } else {
+          diagram = await fetchLatestDiagram();
+        }
 
         if (isCancelled) {
           return;
@@ -430,6 +477,7 @@ export function EditorShell() {
 
         setDiagramId(diagram.id);
         setTitle(loadedTitle);
+        setIsPublic(diagram.isPublic);
         setPages(normalizedPages);
         setActivePageId(resolvedActivePageId);
         hydratePage(activePage);
@@ -474,12 +522,16 @@ export function EditorShell() {
     return () => {
       isCancelled = true;
     };
-  }, [createPageSnapshot, hydratePage, syncHistoryAvailability]);
+  }, [createPageSnapshot, hydratePage, initialDiagramId, syncHistoryAvailability]);
 
   useEffect(() => {
     return () => {
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
+      }
+
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
       }
     };
   }, []);
@@ -539,6 +591,190 @@ export function EditorShell() {
       });
   }, [edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]);
 
+  const normalizedTitle = title.trim() || "Untitled Diagram";
+
+  const activePageName = useMemo(
+    () => pages.find((page) => page.id === activePageId)?.name ?? "Page 1",
+    [activePageId, pages]
+  );
+
+  const shareUrl = useMemo(() => {
+    if (!diagramId || !activePageId) {
+      return null;
+    }
+
+    if (typeof window === "undefined") {
+      return `/d/${diagramId}/p/${activePageId}`;
+    }
+
+    return new URL(`/d/${diagramId}/p/${activePageId}`, window.location.origin).toString();
+  }, [activePageId, diagramId]);
+
+  const exportBounds = useMemo(() => {
+    if (visibleNodes.length === 0) {
+      return null;
+    }
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    visibleNodes.forEach((node) => {
+      const width = node.data.size.width;
+      const height = node.data.size.height;
+      minX = Math.min(minX, node.position.x);
+      minY = Math.min(minY, node.position.y);
+      maxX = Math.max(maxX, node.position.x + width);
+      maxY = Math.max(maxY, node.position.y + height);
+    });
+
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(maxX - minX, 1),
+      height: Math.max(maxY - minY, 1),
+    };
+  }, [visibleNodes]);
+
+  const downloadFromDataUrl = useCallback((dataUrl: string, extension: "png" | "svg") => {
+    const anchor = document.createElement("a");
+    const fileBase = sanitizeFileName(`${normalizedTitle}-${activePageName}`);
+
+    anchor.href = dataUrl;
+    anchor.download = `${fileBase}.${extension}`;
+    anchor.rel = "noopener";
+    anchor.click();
+  }, [activePageName, normalizedTitle]);
+
+  const buildExportOptions = useCallback(() => {
+    if (!exportBounds) {
+      return null;
+    }
+
+    const width = Math.ceil(exportBounds.width + EXPORT_PADDING * 2);
+    const height = Math.ceil(exportBounds.height + EXPORT_PADDING * 2);
+
+    return {
+      width,
+      height,
+      backgroundColor: exportBackground === "white" ? "#ffffff" : undefined,
+      style: {
+        width: `${width}px`,
+        height: `${height}px`,
+        transform: `translate(${EXPORT_PADDING - exportBounds.x}px, ${
+          EXPORT_PADDING - exportBounds.y
+        }px)`,
+      },
+    };
+  }, [exportBackground, exportBounds]);
+
+  const getViewportElement = useCallback(() => {
+    return document.querySelector(".react-flow__viewport") as HTMLElement | null;
+  }, []);
+
+  const handleExportPng = useCallback(async () => {
+    if (!exportBounds) {
+      toast.error("Nothing visible to export on this page.");
+      return;
+    }
+
+    const viewportElement = getViewportElement();
+    const options = buildExportOptions();
+
+    if (!viewportElement || !options) {
+      toast.error("Canvas export is unavailable right now.");
+      return;
+    }
+
+    setIsExportingPng(true);
+
+    try {
+      const dataUrl = await toPng(viewportElement, {
+        ...options,
+        pixelRatio: PNG_EXPORT_SCALE,
+        cacheBust: true,
+      });
+      downloadFromDataUrl(dataUrl, "png");
+      toast.success("PNG exported.");
+    } catch {
+      toast.error("Failed to export PNG.");
+    } finally {
+      setIsExportingPng(false);
+    }
+  }, [buildExportOptions, downloadFromDataUrl, exportBounds, getViewportElement]);
+
+  const handleExportSvg = useCallback(async () => {
+    if (!exportBounds) {
+      toast.error("Nothing visible to export on this page.");
+      return;
+    }
+
+    const viewportElement = getViewportElement();
+    const options = buildExportOptions();
+
+    if (!viewportElement || !options) {
+      toast.error("Canvas export is unavailable right now.");
+      return;
+    }
+
+    setIsExportingSvg(true);
+
+    try {
+      const dataUrl = await toSvg(viewportElement, {
+        ...options,
+        cacheBust: true,
+      });
+      downloadFromDataUrl(dataUrl, "svg");
+      toast.success("SVG exported.");
+    } catch {
+      toast.error("Failed to export SVG.");
+    } finally {
+      setIsExportingSvg(false);
+    }
+  }, [buildExportOptions, downloadFromDataUrl, exportBounds, getViewportElement]);
+
+  const handleCopyShareUrl = useCallback(async () => {
+    if (!shareUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setIsCopyShareSuccess(true);
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        setIsCopyShareSuccess(false);
+      }, 1500);
+      toast.success("Share link copied.");
+    } catch {
+      toast.error("Failed to copy link.");
+    }
+  }, [shareUrl]);
+
+  const handleToggleShare = useCallback(
+    async (nextIsPublic: boolean) => {
+      if (!diagramId) {
+        return;
+      }
+
+      setIsUpdatingShare(true);
+
+      try {
+        const updated = await updateDiagramShare({ diagramId, isPublic: nextIsPublic });
+        setIsPublic(updated.isPublic);
+        toast.success(updated.isPublic ? "Public link enabled." : "Public link disabled.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to update sharing.");
+      } finally {
+        setIsUpdatingShare(false);
+      }
+    },
+    [diagramId]
+  );
+
   const diagramDocument = useMemo(() => {
     if (!activePageId || pages.length === 0) {
       return emptyDocumentRef.current;
@@ -555,9 +791,6 @@ export function EditorShell() {
       edges,
       fallbackLayerId
     );
-    const activePageName =
-      pages.find((page) => page.id === activePageId)?.name ?? "Page 1";
-
     const activePage = ensurePageLayerRefs({
       id: activePageId,
       name: activePageName,
@@ -579,9 +812,19 @@ export function EditorShell() {
       activePageId,
       pages: mergedPages,
     };
-  }, [activeLayerId, activePageId, edges, gridSize, layers, nodes, pages, snapEnabled, viewport]);
+  }, [
+    activeLayerId,
+    activePageId,
+    activePageName,
+    edges,
+    gridSize,
+    layers,
+    nodes,
+    pages,
+    snapEnabled,
+    viewport,
+  ]);
 
-  const normalizedTitle = title.trim() || "Untitled Diagram";
   const currentSignature = useMemo(
     () =>
       JSON.stringify({
@@ -640,6 +883,7 @@ export function EditorShell() {
 
       lastSavedSignatureRef.current = requestSignature;
       setLastSavedAt(updated.updatedAt);
+      setIsPublic(updated.isPublic);
       setSaveStatus("saved");
     } catch (error) {
       setSaveStatus("error");
@@ -1087,6 +1331,18 @@ export function EditorShell() {
               onAddPage={handleAddPage}
               isPageDisabled={isLoading}
               onOpenMobileChat={() => setIsMobileChatOpen(true)}
+              onExportPng={handleExportPng}
+              onExportSvg={handleExportSvg}
+              exportBackground={exportBackground}
+              onExportBackgroundChange={setExportBackground}
+              isExportingPng={isExportingPng}
+              isExportingSvg={isExportingSvg}
+              shareUrl={shareUrl}
+              isPublic={isPublic}
+              isUpdatingShare={isUpdatingShare}
+              onToggleShare={handleToggleShare}
+              onCopyShareUrl={handleCopyShareUrl}
+              isCopyShareSuccess={isCopyShareSuccess}
             />
             <div className="flex min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-5">
               <EditorToolbar activeTool={activeTool} onToolSelect={setActiveTool} />

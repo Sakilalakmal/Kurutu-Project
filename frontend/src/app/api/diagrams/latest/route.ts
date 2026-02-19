@@ -40,6 +40,7 @@ export async function GET() {
     diagram: {
       id: diagram.id,
       title: diagram.title,
+      isPublic: diagram.isPublic,
       data,
       createdAt: diagram.createdAt,
       updatedAt: diagram.updatedAt,
