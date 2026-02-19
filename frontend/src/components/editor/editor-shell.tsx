@@ -69,7 +69,14 @@ import {
   type EditorNodeData,
 } from "@/lib/diagram/mapper";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
-import { snapNodePosition, snapPosition } from "@/lib/diagram/snap";
+import { snapPosition } from "@/lib/diagram/snap";
+import {
+  buildSnapTargets,
+  computeSnap,
+  type NodeRect,
+  type SnapGuides,
+  type SnapTargets,
+} from "@/lib/diagram/smartSnap";
 import type {
   DiagramEdgeType,
   DiagramLayer,
@@ -82,6 +89,8 @@ import type {
 const AUTOSAVE_DELAY_MS = 800;
 const EXPORT_PADDING = 48;
 const PNG_EXPORT_SCALE = 3;
+const SMART_SNAP_THRESHOLD = 6;
+const POSITION_EPSILON = 0.001;
 
 const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -134,6 +143,31 @@ const isEditableTarget = (target: EventTarget | null) => {
   );
 };
 
+const resolveNodeRect = (node: Node<EditorNodeData>): NodeRect | null => {
+  const width = node.data?.size.width ?? node.measured?.width ?? node.width;
+  const height = node.data?.size.height ?? node.measured?.height ?? node.height;
+
+  if (!width || !height || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return null;
+  }
+
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width,
+    height,
+  };
+};
+
+const areSnapGuidesEqual = (left: SnapGuides | null, right: SnapGuides | null) => {
+  const leftX = left?.x;
+  const leftY = left?.y;
+  const rightX = right?.x;
+  const rightY = right?.y;
+
+  return leftX === rightX && leftY === rightY;
+};
+
 export function EditorShell({
   initialDiagramId = null,
 }: {
@@ -167,6 +201,7 @@ export function EditorShell({
   const [isCopyShareSuccess, setIsCopyShareSuccess] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [snapGuides, setSnapGuides] = useState<SnapGuides | null>(null);
   const [flowInstance, setFlowInstance] = useState<
     ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
@@ -187,6 +222,9 @@ export function EditorShell({
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTemplateFitRef = useRef(false);
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
+  const snapTargetsRef = useRef<SnapTargets | null>(null);
+  const activeDragNodeIdRef = useRef<string | null>(null);
+  const dragSmartEnabledRef = useRef(false);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -1355,35 +1393,145 @@ export function EditorShell({
     ]
   );
 
-  const handleNodeDragStart = useCallback(() => {
-    isDraggingNodeRef.current = true;
+  const setSnapGuidesIfChanged = useCallback((nextGuides: SnapGuides | null) => {
+    setSnapGuides((currentGuides) =>
+      areSnapGuidesEqual(currentGuides, nextGuides) ? currentGuides : nextGuides
+    );
   }, []);
+
+  const handleNodeDragStart = useCallback(
+    (node: Node<EditorNodeData>, draggingNodes: Node<EditorNodeData>[]) => {
+      isDraggingNodeRef.current = true;
+      activeDragNodeIdRef.current = null;
+      snapTargetsRef.current = null;
+      dragSmartEnabledRef.current = false;
+      setSnapGuidesIfChanged(null);
+
+      if (!snapEnabledRef.current || draggingNodes.length !== 1) {
+        return;
+      }
+
+      if (isLayerLocked(layersRef.current, node.data.layerId)) {
+        return;
+      }
+
+      const draggingNodeIds = new Set(draggingNodes.map((entry) => entry.id));
+
+      if (draggingNodeIds.size !== 1) {
+        return;
+      }
+
+      const hiddenLayerIds = new Set(
+        layersRef.current.filter((layer) => !layer.isVisible).map((layer) => layer.id)
+      );
+      const targetRects = nodesRef.current
+        .filter((entry) => !draggingNodeIds.has(entry.id))
+        .filter((entry) => !hiddenLayerIds.has(entry.data.layerId))
+        .filter((entry) => !isLayerLocked(layersRef.current, entry.data.layerId))
+        .map(resolveNodeRect)
+        .filter((rect): rect is NodeRect => rect !== null);
+
+      if (targetRects.length === 0) {
+        return;
+      }
+
+      activeDragNodeIdRef.current = node.id;
+      snapTargetsRef.current = buildSnapTargets(targetRects);
+      dragSmartEnabledRef.current = true;
+    },
+    [setSnapGuidesIfChanged]
+  );
+
+  const handleNodeDrag = useCallback(
+    (node: Node<EditorNodeData>, draggingNodes: Node<EditorNodeData>[]) => {
+      if (
+        !dragSmartEnabledRef.current ||
+        draggingNodes.length !== 1 ||
+        activeDragNodeIdRef.current !== node.id
+      ) {
+        setSnapGuidesIfChanged(null);
+        return;
+      }
+
+      if (isLayerLocked(layersRef.current, node.data.layerId)) {
+        setSnapGuidesIfChanged(null);
+        return;
+      }
+
+      const targets = snapTargetsRef.current;
+      const draggingRect = resolveNodeRect(node);
+
+      if (!targets || !draggingRect) {
+        setSnapGuidesIfChanged(null);
+        return;
+      }
+
+      const nextSnap = computeSnap(
+        node.position,
+        draggingRect,
+        targets,
+        SMART_SNAP_THRESHOLD
+      );
+
+      if (!nextSnap.snappedX && !nextSnap.snappedY) {
+        setSnapGuidesIfChanged(null);
+        return;
+      }
+
+      setSnapGuidesIfChanged(nextSnap.guides);
+
+      if (
+        Math.abs(nextSnap.snappedPosition.x - node.position.x) < POSITION_EPSILON &&
+        Math.abs(nextSnap.snappedPosition.y - node.position.y) < POSITION_EPSILON
+      ) {
+        return;
+      }
+
+      setNodes((currentNodes) => {
+        let changed = false;
+
+        const nextNodes = currentNodes.map((entry) => {
+          if (entry.id !== node.id) {
+            return entry;
+          }
+
+          if (
+            Math.abs(entry.position.x - nextSnap.snappedPosition.x) < POSITION_EPSILON &&
+            Math.abs(entry.position.y - nextSnap.snappedPosition.y) < POSITION_EPSILON
+          ) {
+            return entry;
+          }
+
+          changed = true;
+
+          return {
+            ...entry,
+            position: nextSnap.snappedPosition,
+          };
+        });
+
+        return changed ? nextNodes : currentNodes;
+      });
+    },
+    [setNodes, setSnapGuidesIfChanged]
+  );
 
   const handleNodeDragStop = useCallback(
     (node: Node<EditorNodeData>) => {
       isDraggingNodeRef.current = false;
+      activeDragNodeIdRef.current = null;
+      snapTargetsRef.current = null;
+      dragSmartEnabledRef.current = false;
+      setSnapGuidesIfChanged(null);
 
       if (isLayerLocked(layersRef.current, node.data.layerId)) {
         showLayerLockedToast();
         return;
       }
 
-      if (snapEnabledRef.current) {
-        setNodes((currentNodes) => {
-          const nextNodes = currentNodes.map((entry) =>
-            entry.id === node.id ? snapNodePosition(entry, gridSizeRef.current) : entry
-          );
-
-          pushHistorySnapshot({ nodes: nextNodes });
-
-          return nextNodes;
-        });
-        return;
-      }
-
       pushHistorySnapshot();
     },
-    [pushHistorySnapshot, setNodes, showLayerLockedToast]
+    [pushHistorySnapshot, setSnapGuidesIfChanged, showLayerLockedToast]
   );
 
   const handleZoomIn = useCallback(() => {
@@ -1511,6 +1659,7 @@ export function EditorShell({
                       gridVisible={gridVisible}
                       snapEnabled={snapEnabled}
                       gridSize={gridSize}
+                      snapGuides={snapGuides}
                       defaultEdgeType={defaultEdgeType}
                       initialViewport={canvasViewport}
                       onNodesChange={handleNodesChange}
@@ -1520,6 +1669,7 @@ export function EditorShell({
                       onCanvasPlaceNode={handleCanvasPlaceNode}
                       onAssetDrop={handleAssetDrop}
                       onNodeDragStart={handleNodeDragStart}
+                      onNodeDrag={handleNodeDrag}
                       onNodeDragStop={handleNodeDragStop}
                       onReady={setFlowInstance}
                       onLockedNodeInteraction={showLayerLockedToast}
