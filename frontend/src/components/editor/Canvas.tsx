@@ -23,6 +23,7 @@ type EditorCanvasProps = {
   nodes: Node<EditorNodeData>[];
   edges: EditorEdge[];
   activeTool: EditorTool;
+  readOnly?: boolean;
   gridVisible: boolean;
   snapEnabled: boolean;
   gridSize: number;
@@ -33,9 +34,9 @@ type EditorCanvasProps = {
   onConnect: (connection: Connection) => void;
   onViewportChange: (viewport: DiagramViewport) => void;
   onCanvasPlaceNode: (position: { x: number; y: number }) => void;
-  onReady: (instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>) => void;
-  onNodeDragStart: () => void;
-  onNodeDragStop: (node: Node<EditorNodeData>) => void;
+  onReady?: (instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>) => void;
+  onNodeDragStart?: () => void;
+  onNodeDragStop?: (node: Node<EditorNodeData>) => void;
   onLockedNodeInteraction: () => void;
 };
 
@@ -43,6 +44,7 @@ function EditorCanvasInner({
   nodes,
   edges,
   activeTool,
+  readOnly = false,
   gridVisible,
   snapEnabled,
   gridSize,
@@ -58,7 +60,7 @@ function EditorCanvasInner({
   onNodeDragStop,
   onLockedNodeInteraction,
 }: EditorCanvasProps) {
-  const interactiveSelection = activeTool === "select";
+  const interactiveSelection = !readOnly && activeTool === "select";
   const [flowInstance, setFlowInstance] = useState<
     ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
@@ -81,7 +83,7 @@ function EditorCanvasInner({
     event: ReactMouseEvent,
     instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>
   ) => {
-    if (activeTool === "select") {
+    if (readOnly || activeTool === "select") {
       return;
     }
 
@@ -104,7 +106,7 @@ function EditorCanvasInner({
         connectionLineType={connectionLineType}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
+        onConnect={readOnly ? undefined : onConnect}
         onMoveEnd={(_, viewport: Viewport) => onViewportChange(viewport)}
         onPaneClick={(event) => {
           if (!flowInstance) {
@@ -115,10 +117,10 @@ function EditorCanvasInner({
         }}
         onInit={(instance) => {
           setFlowInstance(instance);
-          onReady(instance);
+          onReady?.(instance);
         }}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDragStop={(_, node) => onNodeDragStop(node)}
+        onNodeDragStart={() => onNodeDragStart?.()}
+        onNodeDragStop={(_, node) => onNodeDragStop?.(node)}
         onNodeClick={(_, node) => {
           if (node.data?.isLocked) {
             onLockedNodeInteraction();

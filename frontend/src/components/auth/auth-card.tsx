@@ -45,6 +45,15 @@ export function AuthCard() {
     () => resolveErrorMessage(searchParams.get("error")),
     [searchParams]
   );
+  const callbackURL = useMemo(() => {
+    const value = searchParams.get("callbackUrl");
+
+    if (value && value.startsWith("/")) {
+      return value;
+    }
+
+    return "/home";
+  }, [searchParams]);
   const activeError = clientError ?? queryError;
 
   const handleGoogleSignIn = async () => {
@@ -53,7 +62,7 @@ export function AuthCard() {
 
     const result = await authClient.signIn.social({
       provider: "google",
-      callbackURL: "/home",
+      callbackURL,
       errorCallbackURL: "/login?error=google_signin_failed",
     });
 

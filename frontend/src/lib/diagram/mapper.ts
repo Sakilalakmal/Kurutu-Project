@@ -20,6 +20,7 @@ export type EditorNodeData = {
   };
   layerId: string;
   isLocked: boolean;
+  isReadOnly: boolean;
   onTextChange: (nodeId: string, nextText: string) => void;
   onLockedInteraction: () => void;
 };
@@ -37,7 +38,8 @@ const isDiagramEdgeType = (value: string | undefined): value is DiagramEdgeType 
 export const toFlowNodes = (
   records: DiagramNodeRecord[],
   onTextChange: (nodeId: string, nextText: string) => void,
-  onLockedInteraction: () => void
+  onLockedInteraction: () => void,
+  options?: { readOnly?: boolean }
 ): Node<EditorNodeData>[] =>
   records.map((record) => ({
     id: record.id,
@@ -49,6 +51,7 @@ export const toFlowNodes = (
       style: record.style,
       layerId: record.layerId,
       isLocked: false,
+      isReadOnly: options?.readOnly ?? false,
       onTextChange,
       onLockedInteraction,
     },

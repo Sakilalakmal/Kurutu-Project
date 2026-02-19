@@ -32,6 +32,7 @@ function EditableShapeNode({
     [kind]
   );
   const isLocked = data.isLocked;
+  const isReadOnly = data.isReadOnly;
 
   const commitText = () => {
     const nextText = draftText.trim();
@@ -55,6 +56,10 @@ function EditableShapeNode({
         color: data.style.textColor,
       }}
       onDoubleClick={() => {
+        if (isReadOnly) {
+          return;
+        }
+
         if (isLocked) {
           data.onLockedInteraction();
           return;
