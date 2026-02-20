@@ -51,9 +51,24 @@ export const applyEdgeStyle = <TEdge extends Edge>(
   style: DiagramEdgeType,
   animated: boolean
 ): TEdge[] =>
-  edges.map((edge) => ({
-    ...edge,
-    type: toRuntimeEdgeType(style),
-    animated,
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }));
+  edges.map((edge) => {
+    const relation = edge.data && typeof edge.data === "object" && "kind" in edge.data
+      ? (edge.data as { kind?: string })
+      : null;
+
+    if (edge.type === "relationEdge" || relation?.kind === "relation") {
+      return {
+        ...edge,
+        type: "relationEdge",
+        animated: false,
+        markerEnd: undefined,
+      };
+    }
+
+    return {
+      ...edge,
+      type: toRuntimeEdgeType(style),
+      animated,
+      markerEnd: { type: MarkerType.ArrowClosed },
+    };
+  });

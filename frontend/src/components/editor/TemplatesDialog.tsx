@@ -24,6 +24,20 @@ type TemplatesDialogProps = {
 function PreviewSvg({ templateId }: { templateId: string }) {
   const preview = getTemplatePreview(templateId);
 
+  if (preview.kind === "data-model") {
+    return (
+      <svg viewBox={preview.viewBox} className="h-full w-full" aria-hidden="true">
+        <rect x="12" y="24" width="92" height="118" rx="8" fill="#ffffff" stroke="#cbd5e1" />
+        <rect x="116" y="52" width="96" height="90" rx="8" fill="#ffffff" stroke="#cbd5e1" />
+        <rect x="224" y="52" width="84" height="90" rx="8" fill="#ffffff" stroke="#cbd5e1" />
+        <path d="M104 83 C112 83 112 83 116 83" stroke="#334155" strokeWidth="1.6" fill="none" />
+        <path d="M212 83 C218 83 218 83 224 83" stroke="#334155" strokeWidth="1.6" fill="none" />
+        <path d="M101 78 L101 88 M104 83 L109 80 M104 83 L109 86" stroke="#334155" strokeWidth="1.2" fill="none" />
+        <path d="M119 78 L119 88 M209 78 L209 88 M227 78 L227 88" stroke="#334155" strokeWidth="1.2" fill="none" />
+      </svg>
+    );
+  }
+
   if (preview.kind === "wireframe") {
     return (
       <svg viewBox={preview.viewBox} className="h-full w-full" aria-hidden="true">

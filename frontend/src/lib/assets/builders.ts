@@ -1,12 +1,15 @@
 import { getAssetById, type AssetDefinition } from "@/lib/assets/catalog";
 import type { TemplateDefinition } from "@/lib/assets/templates";
 import {
+  cloneDataTableNodeData,
   DEFAULT_SETTINGS,
   DEFAULT_VIEWPORT,
+  getDataTableNodeHeight,
   getDefaultNodeSize,
   getDefaultNodeStyle,
 } from "@/lib/diagram/defaults";
 import { ensurePageLayerRefs } from "@/lib/diagram/layers";
+import { cloneRelationEdgeData } from "@/lib/diagram/relations";
 import type {
   DiagramEdgeRecord,
   DiagramNodeRecord,
@@ -22,11 +25,12 @@ const createId = (prefix: string) =>
 
 const resolveAssetStyle = (
   asset: AssetDefinition,
-  overrides?: Pick<DiagramNodeRecord, "size" | "text" | "style">
+  overrides?: Pick<DiagramNodeRecord, "size" | "text" | "style" | "data">
 ) => ({
   size: overrides?.size ?? asset.defaultSize,
   text: overrides?.text ?? asset.defaultData.text,
   style: overrides?.style ?? asset.defaultStyle,
+  data: overrides?.data ?? asset.defaultData.nodeData,
 });
 
 export const createNodeFromAsset = (
@@ -34,7 +38,15 @@ export const createNodeFromAsset = (
   position: { x: number; y: number },
   layerId: string
 ): DiagramNodeRecord => {
-  const { size, text, style } = resolveAssetStyle(asset);
+  const { size, text, style, data } = resolveAssetStyle(asset);
+  const resolvedData = data ? cloneDataTableNodeData(data) : undefined;
+  const resolvedSize =
+    asset.nodeType === "dataTable" && resolvedData
+      ? {
+          width: size.width,
+          height: getDataTableNodeHeight(resolvedData.fields.length),
+        }
+      : size;
 
   return {
     id: createId("node"),
@@ -44,8 +56,8 @@ export const createNodeFromAsset = (
       y: position.y,
     },
     size: {
-      width: size.width,
-      height: size.height,
+      width: resolvedSize.width,
+      height: resolvedSize.height,
     },
     text,
     style: {
@@ -54,6 +66,7 @@ export const createNodeFromAsset = (
       textColor: style.textColor,
     },
     layerId,
+    data: resolvedData,
   };
 };
 
@@ -118,8 +131,15 @@ export const applyTemplate = (
       ...nextNode,
       id: nodeIdMap.get(node.id) ?? createId("node"),
       text: node.text ?? nextNode.text,
-      size: node.size ?? nextNode.size,
+      size:
+        node.data && (node.type ?? asset?.nodeType) === "dataTable"
+          ? {
+              width: (node.size ?? nextNode.size).width,
+              height: getDataTableNodeHeight(node.data.fields.length),
+            }
+          : node.size ?? nextNode.size,
       style: node.style ?? nextNode.style,
+      data: node.data ?? nextNode.data,
     };
   });
 
@@ -136,9 +156,18 @@ export const applyTemplate = (
         id: createId("edge"),
         source,
         target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
         type: edge.type ?? "smoothstep",
         layerId:
           layerIdMap.get(edge.layerId ?? fallbackLayer.id) ?? resolvedFallbackLayerId,
+        data: edge.data
+          ? cloneRelationEdgeData({
+              ...edge.data,
+              fromTableId: nodeIdMap.get(edge.data.fromTableId) ?? source,
+              toTableId: nodeIdMap.get(edge.data.toTableId) ?? target,
+            })
+          : undefined,
       },
     ];
   });

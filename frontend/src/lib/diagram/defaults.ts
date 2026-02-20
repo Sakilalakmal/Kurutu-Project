@@ -1,4 +1,6 @@
 import type {
+  DataTableField,
+  DataTableNodeData,
   DiagramDocument,
   DiagramSettings,
   DiagramNodeRecord,
@@ -11,6 +13,11 @@ const createId = (prefix: string) =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+export const createDataTableFieldId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `field-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 export const DEFAULT_VIEWPORT: DiagramViewport = {
   x: 0,
@@ -26,6 +33,12 @@ export const DEFAULT_SETTINGS: DiagramSettings = {
   edgeStyle: "smoothstep",
   edgeAnimated: false,
 };
+
+const DATA_TABLE_DEFAULT_WIDTH = 300;
+const DATA_TABLE_HEADER_HEIGHT = 38;
+const DATA_TABLE_ROW_HEIGHT = 34;
+const DATA_TABLE_FOOTER_HEIGHT = 36;
+const DATA_TABLE_MIN_ROWS = 1;
 
 const DEFAULT_NODE_STYLES: Record<DiagramNodeType, DiagramNodeStyle> = {
   rectangle: {
@@ -48,6 +61,11 @@ const DEFAULT_NODE_STYLES: Record<DiagramNodeType, DiagramNodeStyle> = {
     stroke: "#00000000",
     textColor: "#111827",
     fontSize: 16,
+  },
+  dataTable: {
+    fill: "#ffffff",
+    stroke: "#cbd5e1",
+    textColor: "#111827",
   },
   wireframeButton: {
     fill: "#f8fafc",
@@ -91,6 +109,11 @@ const DEFAULT_NODE_SIZES: Record<DiagramNodeType, { width: number; height: numbe
   ellipse: { width: 180, height: 110 },
   sticky: { width: 190, height: 135 },
   textNode: { width: 220, height: 42 },
+  dataTable: {
+    width: DATA_TABLE_DEFAULT_WIDTH,
+    height:
+      DATA_TABLE_HEADER_HEIGHT + DATA_TABLE_ROW_HEIGHT * DATA_TABLE_MIN_ROWS + DATA_TABLE_FOOTER_HEIGHT,
+  },
   wireframeButton: { width: 144, height: 48 },
   wireframeInput: { width: 220, height: 52 },
   wireframeCard: { width: 280, height: 170 },
@@ -105,6 +128,7 @@ const DEFAULT_NODE_TEXT: Record<DiagramNodeType, string> = {
   ellipse: "Ellipse",
   sticky: "Sticky note",
   textNode: "Text",
+  dataTable: "Table",
   wireframeButton: "Button",
   wireframeInput: "Input",
   wireframeCard: "Card",
@@ -119,6 +143,36 @@ export const getDefaultNodeStyle = (type: DiagramNodeType): DiagramNodeStyle =>
 
 export const getDefaultNodeSize = (type: DiagramNodeType) => DEFAULT_NODE_SIZES[type];
 
+export const getDataTableNodeHeight = (fieldCount: number) =>
+  DATA_TABLE_HEADER_HEIGHT +
+  DATA_TABLE_ROW_HEIGHT * Math.max(DATA_TABLE_MIN_ROWS, fieldCount) +
+  DATA_TABLE_FOOTER_HEIGHT;
+
+const cloneDataTableField = (field: DataTableField): DataTableField => ({
+  id: field.id,
+  name: field.name,
+  type: field.type,
+  isPK: field.isPK,
+  isFK: field.isFK,
+});
+
+export const cloneDataTableNodeData = (input: DataTableNodeData): DataTableNodeData => ({
+  tableName: input.tableName,
+  fields: input.fields.map(cloneDataTableField),
+});
+
+export const createDefaultDataTableNodeData = (tableName = "Table"): DataTableNodeData => ({
+  tableName,
+  fields: [
+    {
+      id: createDataTableFieldId(),
+      name: "id",
+      type: "int",
+      isPK: true,
+    },
+  ],
+});
+
 export const createDefaultNodeRecord = ({
   id,
   type,
@@ -132,13 +186,34 @@ export const createDefaultNodeRecord = ({
   y: number;
   layerId: string;
 }): DiagramNodeRecord => ({
-  id,
-  type,
-  position: { x, y },
-  size: getDefaultNodeSize(type),
-  text: DEFAULT_NODE_TEXT[type],
-  style: getDefaultNodeStyle(type),
-  layerId,
+  ...(() => {
+    if (type === "dataTable") {
+      const data = createDefaultDataTableNodeData();
+      return {
+        id,
+        type,
+        position: { x, y },
+        size: {
+          width: getDefaultNodeSize(type).width,
+          height: getDataTableNodeHeight(data.fields.length),
+        },
+        text: DEFAULT_NODE_TEXT[type],
+        style: getDefaultNodeStyle(type),
+        layerId,
+        data,
+      } satisfies DiagramNodeRecord;
+    }
+
+    return {
+      id,
+      type,
+      position: { x, y },
+      size: getDefaultNodeSize(type),
+      text: DEFAULT_NODE_TEXT[type],
+      style: getDefaultNodeStyle(type),
+      layerId,
+    } satisfies DiagramNodeRecord;
+  })(),
 });
 
 export const createEmptyDiagramDocument = (): DiagramDocument => {

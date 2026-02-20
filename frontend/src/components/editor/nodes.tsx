@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
+import { DataTableNode } from "@/components/editor/nodes/DataTableNode";
 import { TextNode } from "@/components/editor/nodes/TextNode";
 import type { EditorNodeData } from "@/lib/diagram/mapper";
 import { cn } from "@/lib/utils";
@@ -66,6 +67,12 @@ function EditableNodeFrame({
         "relative flex items-center justify-center border bg-white px-3 py-2 text-center transition-all duration-200 ease-out",
         "motion-safe:hover:-translate-y-0.5 motion-safe:hover:shadow-[0_18px_36px_-28px_rgba(17,24,39,0.75)]",
         selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white" : "ring-0",
+        !selected && data.relationHighlight === "strong"
+          ? "ring-2 ring-cyan-500/90 ring-offset-1 ring-offset-white"
+          : "",
+        !selected && data.relationHighlight === "subtle"
+          ? "ring-1 ring-cyan-500/55 ring-offset-1 ring-offset-white"
+          : "",
         shapeClassMap[kind]
       )}
       style={{
@@ -259,6 +266,7 @@ export const editorNodeTypes: NodeTypes = {
   ellipse: EllipseNode,
   sticky: StickyNode,
   textNode: TextNode,
+  dataTable: DataTableNode,
   wireframeButton: WireframeButtonNode,
   wireframeInput: WireframeInputNode,
   wireframeCard: WireframeCardNode,

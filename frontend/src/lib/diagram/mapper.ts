@@ -1,10 +1,23 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
-import { getDefaultNodeSize, getDefaultNodeStyle } from "@/lib/diagram/defaults";
+import {
+  createDefaultDataTableNodeData,
+  getDataTableNodeHeight,
+  getDefaultNodeSize,
+  getDefaultNodeStyle,
+} from "@/lib/diagram/defaults";
 import { toRuntimeEdgeType, toStoredEdgeStyle } from "@/lib/diagram/edges";
+import {
+  cloneRelationEdgeData,
+  sanitizeDataTableNodeData,
+  sanitizeRelationEdgeData,
+} from "@/lib/diagram/relations";
 import type {
+  DataTableField,
+  DataTableNodeData,
   DiagramEdgeRecord,
   DiagramNodeRecord,
   DiagramNodeType,
+  RelationEdgeData,
 } from "@/lib/diagram/types";
 
 export type EditorNodeData = {
@@ -24,12 +37,35 @@ export type EditorNodeData = {
   isLocked: boolean;
   isReadOnly: boolean;
   autoEdit?: boolean;
+  dataModel?: DataTableNodeData;
+  highlightedFieldIds?: string[];
+  relationHighlight?: "none" | "subtle" | "strong";
   onTextChange: (nodeId: string, nextText: string) => void;
+  onDataTableTableNameCommit?: (nodeId: string, nextTableName: string) => void;
+  onDataTableFieldCommit?: (
+    nodeId: string,
+    fieldId: string,
+    patch: Partial<Pick<DataTableField, "name" | "type">>
+  ) => void;
+  onDataTableFieldToggle?: (nodeId: string, fieldId: string, key: "isPK" | "isFK") => void;
+  onDataTableFieldAdd?: (nodeId: string) => void;
+  onDataTableFieldDelete?: (nodeId: string, fieldId: string) => void;
+  onDataTableFieldMove?: (nodeId: string, fieldId: string, direction: "up" | "down") => void;
   onLockedInteraction: () => void;
 };
 
-export type EditorEdge = Edge & {
+export type RuntimeRelationEdgeData = RelationEdgeData & {
+  isHovered?: boolean;
+  isConnectedToHoveredNode?: boolean;
+  isDimmed?: boolean;
+  readOnly?: boolean;
+  onHoverChange?: (edgeId: string | null) => void;
+  onRelationDataChange?: (edgeId: string, updates: Partial<RelationEdgeData>) => void;
+};
+
+export type EditorEdge = Edge<Record<string, unknown>> & {
   layerId: string;
+  data?: RuntimeRelationEdgeData;
 };
 
 const isDiagramNodeType = (value: string): value is DiagramNodeType =>
@@ -37,6 +73,7 @@ const isDiagramNodeType = (value: string): value is DiagramNodeType =>
   value === "ellipse" ||
   value === "sticky" ||
   value === "textNode" ||
+  value === "dataTable" ||
   value === "wireframeButton" ||
   value === "wireframeInput" ||
   value === "wireframeCard" ||
@@ -51,34 +88,54 @@ export const toFlowNodes = (
   onLockedInteraction: () => void,
   options?: { readOnly?: boolean; autoEditNodeId?: string | null }
 ): Node<EditorNodeData>[] =>
-  records.map((record) => ({
-    id: record.id,
-    type: record.type,
-    position: record.position,
-    data: {
-      text: record.text,
-      size: record.size,
-      style: record.style,
-      layerId: record.layerId,
-      isLocked: false,
-      isReadOnly: options?.readOnly ?? false,
-      autoEdit: options?.autoEditNodeId === record.id,
-      onTextChange,
-      onLockedInteraction,
-    },
-  }));
+  records.map((record) => {
+    const dataModel =
+      record.type === "dataTable"
+        ? sanitizeDataTableNodeData(record.data) ??
+          createDefaultDataTableNodeData(record.text || "Table")
+        : undefined;
+
+    return {
+      id: record.id,
+      type: record.type,
+      position: record.position,
+      data: {
+        text: record.text,
+        size:
+          record.type === "dataTable" && dataModel
+            ? {
+                width: record.size.width,
+                height: getDataTableNodeHeight(dataModel.fields.length),
+              }
+            : record.size,
+        style: record.style,
+        layerId: record.layerId,
+        isLocked: false,
+        isReadOnly: options?.readOnly ?? false,
+        autoEdit: options?.autoEditNodeId === record.id,
+        dataModel,
+        onTextChange,
+        onLockedInteraction,
+      },
+    };
+  });
 
 export const toFlowEdges = (records: DiagramEdgeRecord[]): EditorEdge[] =>
-  records.map((record) => ({
-    id: record.id,
-    source: record.source,
-    target: record.target,
-    sourceHandle: record.sourceHandle,
-    targetHandle: record.targetHandle,
-    type: toRuntimeEdgeType(toStoredEdgeStyle(record.type)),
-    markerEnd: { type: MarkerType.ArrowClosed },
-    layerId: record.layerId,
-  }));
+  records.map((record) => {
+    const relationData = sanitizeRelationEdgeData(record.data);
+
+    return {
+      id: record.id,
+      source: record.source,
+      target: record.target,
+      sourceHandle: record.sourceHandle,
+      targetHandle: record.targetHandle,
+      type: relationData ? "relationEdge" : toRuntimeEdgeType(toStoredEdgeStyle(record.type)),
+      markerEnd: relationData ? undefined : { type: MarkerType.ArrowClosed },
+      data: relationData ? { ...relationData } : undefined,
+      layerId: record.layerId,
+    };
+  });
 
 const toNodeRecord = (node: Node<EditorNodeData>, fallbackLayerId: string): DiagramNodeRecord | null => {
   const rawType = node.type ?? "";
@@ -101,6 +158,10 @@ const toNodeRecord = (node: Node<EditorNodeData>, fallbackLayerId: string): Diag
     text: node.data?.text ?? rawType,
     style: node.data?.style ?? fallbackStyle,
     layerId: node.data?.layerId ?? fallbackLayerId,
+    data:
+      rawType === "dataTable" && node.data?.dataModel
+        ? sanitizeDataTableNodeData(node.data.dataModel)
+        : undefined,
   };
 };
 
@@ -109,14 +170,17 @@ const toEdgeRecord = (edge: EditorEdge, fallbackLayerId: string): DiagramEdgeRec
     return null;
   }
 
+  const relationData = sanitizeRelationEdgeData(edge.data);
+
   return {
     id: edge.id,
     source: edge.source,
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? undefined,
     targetHandle: edge.targetHandle ?? undefined,
-    type: toStoredEdgeStyle(edge.type),
+    type: relationData ? undefined : toStoredEdgeStyle(edge.type),
     layerId: edge.layerId ?? fallbackLayerId,
+    data: relationData ? cloneRelationEdgeData(relationData) : undefined,
   };
 };
 

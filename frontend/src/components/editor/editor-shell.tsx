@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng, toSvg } from "html-to-image";
 import { ChevronLeft, ChevronRight, Layers3 } from "lucide-react";
 import {
-  addEdge,
   type Connection,
   type Node,
   type NodeChange,
@@ -46,6 +45,8 @@ import {
   updateDiagramShare,
 } from "@/lib/diagram/api";
 import {
+  createDataTableFieldId,
+  getDataTableNodeHeight,
   createDefaultNodeRecord,
   DEFAULT_GRID_SIZE,
   DEFAULT_SETTINGS,
@@ -53,6 +54,13 @@ import {
   createEmptyDiagramDocument,
 } from "@/lib/diagram/defaults";
 import { createHistory, type DiagramSnapshot } from "@/lib/diagram/history";
+import {
+  buildRelationAutoLabel,
+  parseFieldHandleId,
+  recomputeAutoRelationLabels,
+  sanitizeRelationEdgeData,
+  setRelationManySideFkIfUnset,
+} from "@/lib/diagram/relations";
 import {
   createDefaultLayer,
   createDefaultPage,
@@ -87,6 +95,7 @@ import type {
   DiagramNodeType,
   DiagramStroke,
   DiagramPage,
+  RelationEdgeData,
   DiagramSettings,
   DiagramViewport,
   EditorTool,
@@ -103,6 +112,11 @@ const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const createEdgeId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `edge-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const createStrokeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -217,6 +231,8 @@ export function EditorShell({
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [snapGuides, setSnapGuides] = useState<SnapGuides | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [flowInstance, setFlowInstance] = useState<
     ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
@@ -450,6 +466,335 @@ export function EditorShell({
     [pushHistorySnapshot, setNodes, showLayerLockedToast]
   );
 
+  const mutateDataTableNode = useCallback(
+    (
+      nodeId: string,
+      updater: (
+        current: NonNullable<EditorNodeData["dataModel"]>
+      ) => NonNullable<EditorNodeData["dataModel"]> | null,
+      options?: { recomputeAutoLabels?: boolean }
+    ) => {
+      let blocked = false;
+
+      setNodes((currentNodes) => {
+        let changed = false;
+
+        const nextNodes = currentNodes.map((node) => {
+          if (node.id !== nodeId || node.type !== "dataTable" || !node.data.dataModel) {
+            return node;
+          }
+
+          if (isLayerLocked(layersRef.current, node.data.layerId)) {
+            blocked = true;
+            return node;
+          }
+
+          const nextModel = updater(node.data.dataModel);
+
+          if (!nextModel) {
+            return node;
+          }
+
+          changed = true;
+
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              dataModel: nextModel,
+              size: {
+                ...node.data.size,
+                height: getDataTableNodeHeight(nextModel.fields.length),
+              },
+            },
+          };
+        });
+
+        if (!changed) {
+          return currentNodes;
+        }
+
+        const nextEdges =
+          options?.recomputeAutoLabels === true
+            ? recomputeAutoRelationLabels(edgesRef.current, nextNodes)
+            : edgesRef.current;
+
+        if (nextEdges !== edgesRef.current) {
+          setEdges(nextEdges);
+        }
+
+        pushHistorySnapshot({
+          nodes: nextNodes,
+          edges: nextEdges,
+        });
+
+        return nextNodes;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+    },
+    [pushHistorySnapshot, setEdges, setNodes, showLayerLockedToast]
+  );
+
+  const handleDataTableTableNameCommit = useCallback(
+    (nodeId: string, nextTableName: string) => {
+      const trimmed = nextTableName.trim();
+
+      if (!trimmed) {
+        return;
+      }
+
+      mutateDataTableNode(
+        nodeId,
+        (current) => {
+          if (current.tableName === trimmed) {
+            return null;
+          }
+
+          return {
+            ...current,
+            tableName: trimmed,
+          };
+        },
+        { recomputeAutoLabels: true }
+      );
+    },
+    [mutateDataTableNode]
+  );
+
+  const handleDataTableFieldCommit = useCallback(
+    (
+      nodeId: string,
+      fieldId: string,
+      patch: Partial<Pick<NonNullable<EditorNodeData["dataModel"]>["fields"][number], "name" | "type">>
+    ) => {
+      mutateDataTableNode(
+        nodeId,
+        (current) => {
+          let changed = false;
+
+          const nextFields = current.fields.map((field) => {
+            if (field.id !== fieldId) {
+              return field;
+            }
+
+            const nextName =
+              patch.name !== undefined ? patch.name.trim() || field.name : field.name;
+            const nextType =
+              patch.type !== undefined ? (patch.type.trim() || undefined) : field.type;
+
+            if (nextName === field.name && nextType === field.type) {
+              return field;
+            }
+
+            changed = true;
+            return {
+              ...field,
+              name: nextName,
+              type: nextType,
+            };
+          });
+
+          if (!changed) {
+            return null;
+          }
+
+          return {
+            ...current,
+            fields: nextFields,
+          };
+        },
+        { recomputeAutoLabels: true }
+      );
+    },
+    [mutateDataTableNode]
+  );
+
+  const handleDataTableFieldToggle = useCallback(
+    (nodeId: string, fieldId: string, key: "isPK" | "isFK") => {
+      mutateDataTableNode(nodeId, (current) => {
+        let changed = false;
+        const nextFields = current.fields.map((field) => {
+          if (field.id !== fieldId) {
+            return field;
+          }
+
+          changed = true;
+          return {
+            ...field,
+            [key]: !(field[key] ?? false),
+          };
+        });
+
+        if (!changed) {
+          return null;
+        }
+
+        return {
+          ...current,
+          fields: nextFields,
+        };
+      });
+    },
+    [mutateDataTableNode]
+  );
+
+  const handleDataTableFieldAdd = useCallback(
+    (nodeId: string) => {
+      mutateDataTableNode(nodeId, (current) => ({
+        ...current,
+        fields: [
+          ...current.fields,
+          {
+            id: createDataTableFieldId(),
+            name: "field",
+          },
+        ],
+      }));
+    },
+    [mutateDataTableNode]
+  );
+
+  const handleDataTableFieldDelete = useCallback(
+    (nodeId: string, fieldId: string) => {
+      mutateDataTableNode(
+        nodeId,
+        (current) => {
+          if (current.fields.length <= 1) {
+            return null;
+          }
+
+          const nextFields = current.fields.filter((field) => field.id !== fieldId);
+
+          if (nextFields.length === current.fields.length) {
+            return null;
+          }
+
+          return {
+            ...current,
+            fields: nextFields,
+          };
+        },
+        { recomputeAutoLabels: true }
+      );
+    },
+    [mutateDataTableNode]
+  );
+
+  const handleDataTableFieldMove = useCallback(
+    (nodeId: string, fieldId: string, direction: "up" | "down") => {
+      mutateDataTableNode(nodeId, (current) => {
+        const index = current.fields.findIndex((field) => field.id === fieldId);
+
+        if (index === -1) {
+          return null;
+        }
+
+        const nextIndex = direction === "up" ? index - 1 : index + 1;
+
+        if (nextIndex < 0 || nextIndex >= current.fields.length) {
+          return null;
+        }
+
+        const nextFields = [...current.fields];
+        const [moved] = nextFields.splice(index, 1);
+        nextFields.splice(nextIndex, 0, moved);
+
+        return {
+          ...current,
+          fields: nextFields,
+        };
+      });
+    },
+    [mutateDataTableNode]
+  );
+
+  const handleRelationEdgeDataChange = useCallback(
+    (edgeId: string, updates: Partial<RelationEdgeData>) => {
+      let blocked = false;
+
+      setEdges((currentEdges) => {
+        let changed = false;
+        let changedRelation: RelationEdgeData | null = null;
+
+        let nextEdges = currentEdges.map((edge) => {
+          if (edge.id !== edgeId) {
+            return edge;
+          }
+
+          if (isLayerLocked(layersRef.current, edge.layerId)) {
+            blocked = true;
+            return edge;
+          }
+
+          const relationData = sanitizeRelationEdgeData(edge.data);
+
+          if (!relationData) {
+            return edge;
+          }
+
+          const nextData: RelationEdgeData = {
+            ...relationData,
+            ...updates,
+          };
+
+          if (nextData.labelMode === "auto") {
+            const nodesById = new Map(nodesRef.current.map((node) => [node.id, node]));
+            nextData.label = buildRelationAutoLabel(nextData, nodesById);
+          }
+
+          if (
+            relationData.relationType === nextData.relationType &&
+            relationData.fromOptional === nextData.fromOptional &&
+            relationData.toOptional === nextData.toOptional &&
+            relationData.labelMode === nextData.labelMode &&
+            (relationData.label ?? "") === (nextData.label ?? "")
+          ) {
+            return edge;
+          }
+
+          changed = true;
+          changedRelation = nextData;
+
+          return {
+            ...edge,
+            data: nextData,
+          };
+        });
+
+        if (!changed) {
+          return currentEdges;
+        }
+
+        let nextNodes = nodesRef.current;
+
+        if (changedRelation) {
+          const fkAdjustedNodes = setRelationManySideFkIfUnset(nextNodes, changedRelation);
+          if (fkAdjustedNodes !== nextNodes) {
+            nextNodes = fkAdjustedNodes;
+            setNodes(nextNodes);
+          }
+        }
+
+        nextEdges = recomputeAutoRelationLabels(nextEdges, nextNodes);
+
+        pushHistorySnapshot({
+          nodes: nextNodes,
+          edges: nextEdges,
+        });
+
+        return nextEdges;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+    },
+    [pushHistorySnapshot, setEdges, setNodes, showLayerLockedToast]
+  );
+
   const createPageSnapshot = useCallback(
     (page: DiagramPage): DiagramSnapshot => {
       const normalizedPage = ensurePageLayerRefs(page);
@@ -485,6 +830,8 @@ export function EditorShell({
 
       setNodes(snapshot.nodes);
       setEdges(normalizedEdges);
+      setHoveredEdgeId(null);
+      setHoveredNodeId(null);
       setStrokes(snapshot.strokes);
       setViewport(snapshot.viewport);
       setCanvasViewport(snapshot.viewport);
@@ -544,6 +891,8 @@ export function EditorShell({
 
       setNodes(flowNodes);
       setEdges(flowEdges);
+      setHoveredEdgeId(null);
+      setHoveredNodeId(null);
       setStrokes(normalizedPage.strokes);
       setViewport(normalizedPage.viewport);
       setCanvasViewport(normalizedPage.viewport);
@@ -712,7 +1061,7 @@ export function EditorShell({
     [layers]
   );
 
-  const visibleNodes = useMemo(() => {
+  const baseVisibleNodes = useMemo(() => {
     return nodes
       .filter((node) => !hiddenLayerIds.has(node.data.layerId))
       .map((node) => {
@@ -725,6 +1074,12 @@ export function EditorShell({
             ...node.data,
             isLocked: locked,
             onLockedInteraction: showLayerLockedToast,
+            onDataTableTableNameCommit: handleDataTableTableNameCommit,
+            onDataTableFieldCommit: handleDataTableFieldCommit,
+            onDataTableFieldToggle: handleDataTableFieldToggle,
+            onDataTableFieldAdd: handleDataTableFieldAdd,
+            onDataTableFieldDelete: handleDataTableFieldDelete,
+            onDataTableFieldMove: handleDataTableFieldMove,
           },
           draggable: !locked,
           selectable: !locked,
@@ -732,32 +1087,178 @@ export function EditorShell({
           zIndex: (layerOrder + 1) * 10,
         };
       });
-  }, [hiddenLayerIds, layerOrderMap, layers, nodes, showLayerLockedToast]);
+  }, [
+    handleDataTableFieldAdd,
+    handleDataTableFieldCommit,
+    handleDataTableFieldDelete,
+    handleDataTableFieldMove,
+    handleDataTableFieldToggle,
+    handleDataTableTableNameCommit,
+    hiddenLayerIds,
+    layerOrderMap,
+    layers,
+    nodes,
+    showLayerLockedToast,
+  ]);
 
   const visibleNodeIds = useMemo(
-    () => new Set(visibleNodes.map((node) => node.id)),
-    [visibleNodes]
+    () => new Set(baseVisibleNodes.map((node) => node.id)),
+    [baseVisibleNodes]
+  );
+
+  const visibleEdgeCandidates = useMemo(
+    () =>
+      edges
+        .filter(
+          (edge) =>
+            !hiddenLayerIds.has(edge.layerId) &&
+            visibleNodeIds.has(edge.source) &&
+            visibleNodeIds.has(edge.target)
+        )
+        .map((edge) => {
+          const layerOrder = layerOrderMap.get(edge.layerId) ?? 0;
+
+          return {
+            ...edge,
+            zIndex: (layerOrder + 1) * 10 - 1,
+          };
+        }),
+    [edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]
+  );
+
+  const relationHighlightByNode = useMemo(() => {
+    const highlightByNode = new Map<
+      string,
+      {
+        level: "none" | "subtle" | "strong";
+        fields: string[];
+      }
+    >();
+
+    const setHighlight = (
+      nodeId: string,
+      level: "none" | "subtle" | "strong",
+      fieldId?: string
+    ) => {
+      const current = highlightByNode.get(nodeId) ?? { level: "none", fields: [] };
+      const levelRank = current.level === "strong" ? 2 : current.level === "subtle" ? 1 : 0;
+      const nextRank = level === "strong" ? 2 : level === "subtle" ? 1 : 0;
+      const nextLevel = nextRank > levelRank ? level : current.level;
+      const fields = fieldId
+        ? current.fields.includes(fieldId)
+          ? current.fields
+          : [...current.fields, fieldId]
+        : current.fields;
+
+      highlightByNode.set(nodeId, {
+        level: nextLevel,
+        fields,
+      });
+    };
+
+    if (hoveredEdgeId) {
+      const hoveredEdge = visibleEdgeCandidates.find((edge) => edge.id === hoveredEdgeId);
+      const relation = sanitizeRelationEdgeData(hoveredEdge?.data);
+
+      if (hoveredEdge) {
+        setHighlight(hoveredEdge.source, "strong");
+        setHighlight(hoveredEdge.target, "strong");
+      }
+
+      if (relation?.fromFieldId) {
+        setHighlight(relation.fromTableId, "strong", relation.fromFieldId);
+      }
+
+      if (relation?.toFieldId) {
+        setHighlight(relation.toTableId, "strong", relation.toFieldId);
+      }
+    }
+
+    if (hoveredNodeId) {
+      setHighlight(hoveredNodeId, "strong");
+      visibleEdgeCandidates.forEach((edge) => {
+        if (edge.source === hoveredNodeId) {
+          setHighlight(edge.target, "subtle");
+        }
+
+        if (edge.target === hoveredNodeId) {
+          setHighlight(edge.source, "subtle");
+        }
+      });
+    }
+
+    return highlightByNode;
+  }, [hoveredEdgeId, hoveredNodeId, visibleEdgeCandidates]);
+
+  const visibleNodes = useMemo(
+    () =>
+      baseVisibleNodes.map((node) => {
+        const relationHighlight = relationHighlightByNode.get(node.id);
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            relationHighlight: relationHighlight?.level ?? "none",
+            highlightedFieldIds: relationHighlight?.fields ?? [],
+          },
+        };
+      }),
+    [baseVisibleNodes, relationHighlightByNode]
   );
 
   const visibleEdges = useMemo(() => {
-    const filteredEdges = edges
-      .filter(
-        (edge) =>
-          !hiddenLayerIds.has(edge.layerId) &&
-          visibleNodeIds.has(edge.source) &&
-          visibleNodeIds.has(edge.target)
-      )
-      .map((edge) => {
-        const layerOrder = layerOrderMap.get(edge.layerId) ?? 0;
+    const relationConnectedToHoveredNode = new Set<string>();
 
+    if (hoveredNodeId) {
+      visibleEdgeCandidates.forEach((edge) => {
+        if (edge.source === hoveredNodeId || edge.target === hoveredNodeId) {
+          relationConnectedToHoveredNode.add(edge.id);
+        }
+      });
+    }
+
+    return applyEdgeStyle(visibleEdgeCandidates, edgeStyle, edgeAnimated).map((edge) => {
+      const relationData = sanitizeRelationEdgeData(edge.data);
+      const isHovered = hoveredEdgeId === edge.id;
+      const isConnectedToHoveredNode = relationConnectedToHoveredNode.has(edge.id);
+      const isDimmed =
+        (hoveredEdgeId !== null && hoveredEdgeId !== edge.id) ||
+        (hoveredNodeId !== null && !isConnectedToHoveredNode && hoveredEdgeId === null);
+
+      if (relationData) {
         return {
           ...edge,
-          zIndex: (layerOrder + 1) * 10 - 1,
+          type: "relationEdge",
+          data: {
+            ...relationData,
+            isHovered,
+            isConnectedToHoveredNode,
+            isDimmed,
+            readOnly: false,
+            onRelationDataChange: handleRelationEdgeDataChange,
+          },
         };
-      });
+      }
 
-    return applyEdgeStyle(filteredEdges, edgeStyle, edgeAnimated);
-  }, [edgeAnimated, edgeStyle, edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]);
+      return {
+        ...edge,
+        style: {
+          ...edge.style,
+          stroke: isHovered ? "#0ea5e9" : isConnectedToHoveredNode ? "#0284c7" : edge.style?.stroke,
+          strokeWidth: isHovered ? 3.2 : isConnectedToHoveredNode ? 2.2 : edge.style?.strokeWidth,
+          opacity: isDimmed ? 0.35 : 1,
+        },
+      };
+    });
+  }, [
+    edgeAnimated,
+    edgeStyle,
+    handleRelationEdgeDataChange,
+    hoveredEdgeId,
+    hoveredNodeId,
+    visibleEdgeCandidates,
+  ]);
 
   const visibleStrokes = useMemo(() => {
     return strokes
@@ -1410,23 +1911,90 @@ export function EditorShell({
         return;
       }
 
+      const isDataTableRelation =
+        sourceNode.type === "dataTable" && targetNode.type === "dataTable";
+
+      if (isDataTableRelation) {
+        setEdges((currentEdges) => {
+          const parsedFromFieldId = parseFieldHandleId(connection.sourceHandle);
+          const parsedToFieldId = parseFieldHandleId(connection.targetHandle);
+          const fromFieldId =
+            parsedFromFieldId && parsedToFieldId ? parsedFromFieldId : undefined;
+          const toFieldId = parsedFromFieldId && parsedToFieldId ? parsedToFieldId : undefined;
+          const baseRelationData: RelationEdgeData = {
+            kind: "relation",
+            fromTableId: sourceNode.id,
+            toTableId: targetNode.id,
+            fromFieldId,
+            toFieldId,
+            relationType: "one-to-many",
+            fromOptional: false,
+            toOptional: false,
+            labelMode: "auto",
+            label: "",
+          };
+          let nextNodes = nodesRef.current;
+          const fkAdjustedNodes = setRelationManySideFkIfUnset(nextNodes, baseRelationData);
+
+          if (fkAdjustedNodes !== nextNodes) {
+            nextNodes = fkAdjustedNodes;
+            setNodes(nextNodes);
+          }
+
+          const nodesById = new Map(nextNodes.map((node) => [node.id, node]));
+          const relationData: RelationEdgeData = {
+            ...baseRelationData,
+            label: buildRelationAutoLabel(baseRelationData, nodesById),
+          };
+          let nextEdges: EditorEdge[] = [
+            ...currentEdges,
+            {
+              id: createEdgeId(),
+              source: connection.source,
+              target: connection.target,
+              sourceHandle: connection.sourceHandle,
+              targetHandle: connection.targetHandle,
+              type: "relationEdge",
+              animated: false,
+              layerId: edgeLayerId,
+              data: relationData,
+            },
+          ];
+
+          nextEdges = recomputeAutoRelationLabels(nextEdges, nextNodes);
+
+          pushHistorySnapshot({
+            nodes: nextNodes,
+            edges: nextEdges,
+          });
+
+          return nextEdges;
+        });
+
+        return;
+      }
+
       setEdges((currentEdges) => {
-        const nextEdges = addEdge(
+        const nextEdges: EditorEdge[] = [
+          ...currentEdges,
           {
-            ...connection,
+            id: createEdgeId(),
+            source: connection.source!,
+            target: connection.target!,
+            sourceHandle: connection.sourceHandle,
+            targetHandle: connection.targetHandle,
             type: toRuntimeEdgeType(edgeStyleRef.current),
             animated: edgeAnimatedRef.current,
             layerId: edgeLayerId,
           },
-          currentEdges
-        ) as EditorEdge[];
+        ];
 
         pushHistorySnapshot({ edges: nextEdges });
 
         return nextEdges;
       });
     },
-    [pushHistorySnapshot, setEdges, showLayerLockedToast]
+    [pushHistorySnapshot, setEdges, setNodes, showLayerLockedToast]
   );
 
   const handleEdgeStyleChange = useCallback(
@@ -2099,6 +2667,8 @@ export function EditorShell({
                       onNodeDragStart={handleNodeDragStart}
                       onNodeDrag={handleNodeDrag}
                       onNodeDragStop={handleNodeDragStop}
+                      onNodeHoverChange={setHoveredNodeId}
+                      onEdgeHoverChange={setHoveredEdgeId}
                       onReady={setFlowInstance}
                       onLockedNodeInteraction={showLayerLockedToast}
                     />

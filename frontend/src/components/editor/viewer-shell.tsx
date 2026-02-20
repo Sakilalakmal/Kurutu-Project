@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { MarkerType, type Node } from "@xyflow/react";
+import { type Node } from "@xyflow/react";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -170,10 +170,20 @@ export function ViewerShell({ diagramId, pageId }: ViewerShellProps) {
       )
       .map((edge) => {
         const layerOrder = layerOrderMap.get(edge.layerId) ?? 0;
+        const relationData =
+          edge.data && typeof edge.data === "object" && "kind" in edge.data
+            ? edge.data
+            : undefined;
 
         return {
           ...edge,
-          markerEnd: { type: MarkerType.ArrowClosed },
+          markerEnd: relationData ? undefined : edge.markerEnd,
+          data: relationData
+            ? {
+                ...relationData,
+                readOnly: true,
+              }
+            : edge.data,
           zIndex: (layerOrder + 1) * 10 - 1,
         };
       });

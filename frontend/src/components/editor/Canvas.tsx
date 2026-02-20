@@ -19,6 +19,7 @@ import {
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
+import { editorEdgeTypes } from "@/components/editor/edges";
 import { editorNodeTypes } from "@/components/editor/nodes";
 import { PenOverlay } from "@/components/editor/PenOverlay";
 import { SnapGuidesOverlay } from "@/components/editor/SnapGuidesOverlay";
@@ -73,6 +74,8 @@ type EditorCanvasProps = {
     node: Node<EditorNodeData>,
     draggingNodes: Node<EditorNodeData>[]
   ) => void;
+  onNodeHoverChange?: (nodeId: string | null) => void;
+  onEdgeHoverChange?: (edgeId: string | null) => void;
   onLockedNodeInteraction: () => void;
 };
 
@@ -105,6 +108,8 @@ function EditorCanvasInner({
   onNodeDragStart,
   onNodeDrag,
   onNodeDragStop,
+  onNodeHoverChange,
+  onEdgeHoverChange,
   onLockedNodeInteraction,
 }: EditorCanvasProps) {
   const interactiveSelection = !readOnly && activeTool === "select";
@@ -179,6 +184,7 @@ function EditorCanvasInner({
         nodes={nodes}
         edges={edges}
         nodeTypes={editorNodeTypes}
+        edgeTypes={editorEdgeTypes}
         defaultViewport={initialViewport}
         defaultEdgeOptions={defaultEdgeOptions}
         connectionLineType={connectionLineType}
@@ -208,6 +214,14 @@ function EditorCanvasInner({
         onNodeDragStart={(_, node, draggingNodes) => onNodeDragStart?.(node, draggingNodes)}
         onNodeDrag={(_, node, draggingNodes) => onNodeDrag?.(node, draggingNodes)}
         onNodeDragStop={(_, node, draggingNodes) => onNodeDragStop?.(node, draggingNodes)}
+        onNodeMouseEnter={(_, node) => onNodeHoverChange?.(node.id)}
+        onNodeMouseLeave={() => onNodeHoverChange?.(null)}
+        onEdgeMouseEnter={(_, edge) => onEdgeHoverChange?.(edge.id)}
+        onEdgeMouseLeave={() => onEdgeHoverChange?.(null)}
+        onPaneMouseLeave={() => {
+          onNodeHoverChange?.(null);
+          onEdgeHoverChange?.(null);
+        }}
         onNodeClick={(_, node) => {
           if (node.data?.isLocked) {
             onLockedNodeInteraction();
