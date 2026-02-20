@@ -1,13 +1,16 @@
 import type {
+  DataTableNodeData,
   DiagramNodeSize,
   DiagramNodeStyle,
   DiagramNodeType,
 } from "@/lib/diagram/types";
+import { createDefaultDataTableNodeData } from "@/lib/diagram/defaults";
 
 export const ASSET_DRAG_MIME = "application/x-kurutu-asset";
 
 export const ASSET_CATEGORIES = [
   "Flowchart",
+  "Data Modeling",
   "Wireframe",
   "Basic Shapes",
 ] as const;
@@ -22,6 +25,7 @@ export type AssetDefinition = {
   defaultSize: DiagramNodeSize;
   defaultData: {
     text: string;
+    nodeData?: DataTableNodeData;
   };
   defaultStyle: DiagramNodeStyle;
   tags: string[];
@@ -77,6 +81,16 @@ export const ASSET_CATALOG: AssetDefinition[] = [
     defaultData: { text: "A" },
     defaultStyle: { fill: "#eef2ff", stroke: "#a5b4fc", textColor: "#1e1b4b" },
     tags: ["connector", "link", "jump", "flowchart"],
+  },
+  {
+    id: "data-table",
+    name: "Data Table",
+    category: "Data Modeling",
+    nodeType: "dataTable",
+    defaultSize: { width: 300, height: 108 },
+    defaultData: { text: "Table", nodeData: createDefaultDataTableNodeData("Table") },
+    defaultStyle: { fill: "#ffffff", stroke: "#cbd5e1", textColor: "#111827" },
+    tags: ["erd", "database", "table", "entity", "modeling"],
   },
   {
     id: "wireframe-button",

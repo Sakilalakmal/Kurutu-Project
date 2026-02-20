@@ -59,7 +59,13 @@ export function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
     <div
       className={cn(
         "relative min-w-[120px] rounded-md border border-transparent bg-transparent px-2 py-1",
-        selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white" : "ring-0"
+        selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white" : "ring-0",
+        !selected && data.relationHighlight === "strong"
+          ? "ring-2 ring-cyan-500/90 ring-offset-1 ring-offset-white"
+          : "",
+        !selected && data.relationHighlight === "subtle"
+          ? "ring-1 ring-cyan-500/55 ring-offset-1 ring-offset-white"
+          : ""
       )}
       style={{
         color: data.style.textColor,

@@ -1,11 +1,13 @@
 import type {
+  DataTableNodeData,
   DiagramEdgeType,
   DiagramNodeSize,
   DiagramNodeStyle,
   DiagramNodeType,
+  RelationEdgeData,
 } from "@/lib/diagram/types";
 
-export type TemplateCategory = "Flowchart" | "Wireframe Kit";
+export type TemplateCategory = "Flowchart" | "Wireframe Kit" | "Data Modeling";
 
 export type TemplateLayerBlueprint = {
   id: string;
@@ -27,14 +29,18 @@ export type TemplateNodeBlueprint = {
   size?: DiagramNodeSize;
   style?: DiagramNodeStyle;
   layerId?: string;
+  data?: DataTableNodeData;
 };
 
 export type TemplateEdgeBlueprint = {
   id: string;
   source: string;
   target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
   type?: DiagramEdgeType;
   layerId?: string;
+  data?: RelationEdgeData;
 };
 
 export type TemplateDefinition = {
@@ -99,6 +105,97 @@ export const TEMPLATE_LIBRARY: TemplateDefinition[] = [
       { id: "e-4", source: "decision-1", target: "process-2", type: "smoothstep" },
       { id: "e-5", source: "data-1", target: "end", type: "smoothstep" },
       { id: "e-6", source: "process-2", target: "end", type: "smoothstep" },
+    ],
+  },
+  {
+    id: "data-model-starter",
+    name: "Data Model Starter",
+    description: "Starter ERD with table fields and linked relationships.",
+    category: "Data Modeling",
+    layers: [{ id: "main", name: "Main", order: 0 }],
+    nodes: [
+      {
+        id: "customers",
+        assetId: "data-table",
+        text: "Customers",
+        position: { x: 70, y: 70 },
+        data: {
+          tableName: "Customers",
+          fields: [
+            { id: "customers-customer-id", name: "CustomerID", type: "int", isPK: true },
+            { id: "customers-name", name: "Name", type: "nvarchar(120)" },
+            { id: "customers-email", name: "Email", type: "nvarchar(160)" },
+          ],
+        },
+      },
+      {
+        id: "orders",
+        assetId: "data-table",
+        text: "Orders",
+        position: { x: 460, y: 170 },
+        data: {
+          tableName: "Orders",
+          fields: [
+            { id: "orders-order-id", name: "OrderID", type: "int", isPK: true },
+            { id: "orders-customer-id", name: "CustomerID", type: "int", isFK: true },
+            { id: "orders-created-at", name: "CreatedAt", type: "datetime" },
+          ],
+        },
+      },
+      {
+        id: "order-items",
+        assetId: "data-table",
+        text: "OrderItems",
+        position: { x: 850, y: 170 },
+        data: {
+          tableName: "OrderItems",
+          fields: [
+            { id: "items-order-item-id", name: "OrderItemID", type: "int", isPK: true },
+            { id: "items-order-id", name: "OrderID", type: "int", isFK: true },
+            { id: "items-product-id", name: "ProductID", type: "int", isFK: true },
+          ],
+        },
+      },
+    ],
+    edges: [
+      {
+        id: "rel-customers-orders",
+        source: "customers",
+        target: "orders",
+        sourceHandle: "field:customers-customer-id:right",
+        targetHandle: "field:orders-customer-id:left",
+        data: {
+          kind: "relation",
+          fromTableId: "customers",
+          toTableId: "orders",
+          fromFieldId: "customers-customer-id",
+          toFieldId: "orders-customer-id",
+          relationType: "one-to-many",
+          fromOptional: false,
+          toOptional: false,
+          labelMode: "auto",
+          label: "Customers.CustomerID \u2192 Orders.CustomerID",
+        },
+      },
+      {
+        id: "rel-orders-items",
+        source: "orders",
+        target: "order-items",
+        sourceHandle: "field:orders-order-id:right",
+        targetHandle: "field:items-order-id:left",
+        data: {
+          kind: "relation",
+          fromTableId: "orders",
+          toTableId: "order-items",
+          fromFieldId: "orders-order-id",
+          toFieldId: "items-order-id",
+          relationType: "one-to-many",
+          fromOptional: false,
+          toOptional: false,
+          labelMode: "auto",
+          label: "Orders.OrderID \u2192 OrderItems.OrderID",
+        },
+      },
     ],
   },
   {

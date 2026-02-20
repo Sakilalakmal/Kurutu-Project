@@ -1,5 +1,6 @@
 import type { Node } from "@xyflow/react";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
+import { cloneRelationEdgeData, sanitizeRelationEdgeData } from "@/lib/diagram/relations";
 import type { DiagramSettings, DiagramStroke, DiagramViewport } from "@/lib/diagram/types";
 
 const MAX_HISTORY_ITEMS = 100;
@@ -20,6 +21,15 @@ const cloneNode = (node: Node<EditorNodeData>): Node<EditorNodeData> => ({
         ...node.data,
         size: { ...node.data.size },
         style: { ...node.data.style },
+        dataModel: node.data.dataModel
+          ? {
+              tableName: node.data.dataModel.tableName,
+              fields: node.data.dataModel.fields.map((field) => ({ ...field })),
+            }
+          : undefined,
+        highlightedFieldIds: node.data.highlightedFieldIds
+          ? [...node.data.highlightedFieldIds]
+          : undefined,
       }
     : node.data,
 });
@@ -30,6 +40,11 @@ const cloneEdge = (edge: EditorEdge): EditorEdge => ({
     edge.markerEnd && typeof edge.markerEnd === "object"
       ? { ...edge.markerEnd }
       : edge.markerEnd,
+  data: (() => {
+    const relationData = sanitizeRelationEdgeData(edge.data);
+
+    return relationData ? cloneRelationEdgeData(relationData) : undefined;
+  })(),
 });
 
 const cloneSnapshot = (snapshot: DiagramSnapshot): DiagramSnapshot => ({
@@ -54,6 +69,7 @@ const snapshotSignature = (snapshot: DiagramSnapshot) =>
       size: node.data?.size ?? null,
       style: node.data?.style ?? null,
       layerId: node.data?.layerId ?? null,
+      dataModel: node.data?.dataModel ?? null,
     })),
     edges: snapshot.edges.map((edge) => ({
       id: edge.id,
@@ -64,6 +80,7 @@ const snapshotSignature = (snapshot: DiagramSnapshot) =>
       type: edge.type ?? "smoothstep",
       selected: Boolean(edge.selected),
       layerId: edge.layerId ?? null,
+      data: sanitizeRelationEdgeData(edge.data) ?? null,
     })),
     strokes: snapshot.strokes.map((stroke) => ({
       id: stroke.id,

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { diagramDocumentSchema, diagramNodeTypeSchema } from "@/lib/diagram/model";
 
 export {
+  dataTableFieldSchema,
+  dataTableNodeDataSchema,
   diagramDocumentSchema,
   diagramEdgeRecordSchema,
   diagramEdgeTypeSchema,
@@ -14,9 +16,14 @@ export {
   diagramSettingsSchema,
   diagramStrokeSchema,
   diagramViewportSchema,
+  relationEdgeDataSchema,
+  relationLabelModeSchema,
+  relationTypeSchema,
 } from "@/lib/diagram/model";
 
 export type {
+  DataTableField,
+  DataTableNodeData,
   DiagramDocument,
   DiagramDocumentV2,
   DiagramEdgeRecord,
@@ -30,6 +37,9 @@ export type {
   DiagramSettings,
   DiagramStroke,
   DiagramViewport,
+  RelationEdgeData,
+  RelationLabelMode,
+  RelationType,
 } from "@/lib/diagram/model";
 
 export const editorToolSchema = z.enum([

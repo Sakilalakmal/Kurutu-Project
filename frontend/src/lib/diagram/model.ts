@@ -5,6 +5,7 @@ export const diagramNodeTypeSchema = z.enum([
   "ellipse",
   "sticky",
   "textNode",
+  "dataTable",
   "wireframeButton",
   "wireframeInput",
   "wireframeCard",
@@ -14,6 +15,41 @@ export const diagramNodeTypeSchema = z.enum([
   "wireframeModal",
 ]);
 export type DiagramNodeType = z.infer<typeof diagramNodeTypeSchema>;
+
+export const dataTableFieldSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  type: z.string().min(1).optional(),
+  isPK: z.boolean().optional(),
+  isFK: z.boolean().optional(),
+});
+export type DataTableField = z.infer<typeof dataTableFieldSchema>;
+
+export const dataTableNodeDataSchema = z.object({
+  tableName: z.string().trim().min(1),
+  fields: z.array(dataTableFieldSchema).min(1),
+});
+export type DataTableNodeData = z.infer<typeof dataTableNodeDataSchema>;
+
+export const relationTypeSchema = z.enum(["one-to-many", "one-to-one", "many-to-many"]);
+export type RelationType = z.infer<typeof relationTypeSchema>;
+
+export const relationLabelModeSchema = z.enum(["auto", "custom"]);
+export type RelationLabelMode = z.infer<typeof relationLabelModeSchema>;
+
+export const relationEdgeDataSchema = z.object({
+  kind: z.literal("relation"),
+  fromTableId: z.string().min(1),
+  toTableId: z.string().min(1),
+  fromFieldId: z.string().min(1).optional(),
+  toFieldId: z.string().min(1).optional(),
+  relationType: relationTypeSchema,
+  fromOptional: z.boolean().optional(),
+  toOptional: z.boolean().optional(),
+  labelMode: relationLabelModeSchema.default("auto"),
+  label: z.string().optional(),
+});
+export type RelationEdgeData = z.infer<typeof relationEdgeDataSchema>;
 
 export const diagramNodeStyleSchema = z.object({
   fill: z.string().min(1),
@@ -73,6 +109,7 @@ export const diagramNodeRecordSchema = z.object({
   text: z.string(),
   style: diagramNodeStyleSchema,
   layerId: z.string().min(1),
+  data: dataTableNodeDataSchema.optional(),
 });
 export type DiagramNodeRecord = z.infer<typeof diagramNodeRecordSchema>;
 
@@ -84,6 +121,7 @@ export const diagramEdgeRecordSchema = z.object({
   targetHandle: z.string().min(1).optional(),
   type: diagramEdgeTypeSchema.optional(),
   layerId: z.string().min(1),
+  data: relationEdgeDataSchema.optional(),
 });
 export type DiagramEdgeRecord = z.infer<typeof diagramEdgeRecordSchema>;
 
