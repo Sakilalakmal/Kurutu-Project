@@ -1,12 +1,13 @@
 import type { Node } from "@xyflow/react";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
-import type { DiagramSettings, DiagramViewport } from "@/lib/diagram/types";
+import type { DiagramSettings, DiagramStroke, DiagramViewport } from "@/lib/diagram/types";
 
 const MAX_HISTORY_ITEMS = 100;
 
 export type DiagramSnapshot = {
   nodes: Node<EditorNodeData>[];
   edges: EditorEdge[];
+  strokes: DiagramStroke[];
   viewport: DiagramViewport;
   settings: DiagramSettings;
 };
@@ -34,6 +35,10 @@ const cloneEdge = (edge: EditorEdge): EditorEdge => ({
 const cloneSnapshot = (snapshot: DiagramSnapshot): DiagramSnapshot => ({
   nodes: snapshot.nodes.map(cloneNode),
   edges: snapshot.edges.map(cloneEdge),
+  strokes: snapshot.strokes.map((stroke) => ({
+    ...stroke,
+    points: stroke.points.map((point) => ({ ...point })),
+  })),
   viewport: { ...snapshot.viewport },
   settings: { ...snapshot.settings },
 });
@@ -59,6 +64,17 @@ const snapshotSignature = (snapshot: DiagramSnapshot) =>
       type: edge.type ?? "smoothstep",
       selected: Boolean(edge.selected),
       layerId: edge.layerId ?? null,
+    })),
+    strokes: snapshot.strokes.map((stroke) => ({
+      id: stroke.id,
+      layerId: stroke.layerId,
+      color: stroke.color,
+      width: stroke.width,
+      opacity: stroke.opacity ?? 1,
+      points: stroke.points.map((point) => ({
+        x: point.x,
+        y: point.y,
+      })),
     })),
     viewport: snapshot.viewport,
     settings: snapshot.settings,

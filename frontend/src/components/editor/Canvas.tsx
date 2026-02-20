@@ -20,12 +20,18 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import { editorNodeTypes } from "@/components/editor/nodes";
+import { PenOverlay } from "@/components/editor/PenOverlay";
 import { SnapGuidesOverlay } from "@/components/editor/SnapGuidesOverlay";
 import { ASSET_DRAG_MIME } from "@/lib/assets/catalog";
 import { toConnectionLineType, toRuntimeEdgeType } from "@/lib/diagram/edges";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
 import type { SnapGuides } from "@/lib/diagram/smartSnap";
-import type { DiagramEdgeType, DiagramViewport, EditorTool } from "@/lib/diagram/types";
+import type {
+  DiagramEdgeType,
+  DiagramStroke,
+  DiagramViewport,
+  EditorTool,
+} from "@/lib/diagram/types";
 
 type EditorCanvasProps = {
   nodes: Node<EditorNodeData>[];
@@ -38,6 +44,11 @@ type EditorCanvasProps = {
   snapGuides?: SnapGuides | null;
   edgeStyle: DiagramEdgeType;
   edgeAnimated: boolean;
+  strokes: DiagramStroke[];
+  penBrushColor: string;
+  penBrushWidth: number;
+  penBrushOpacity: number;
+  penEraserEnabled: boolean;
   initialViewport: DiagramViewport;
   onNodesChange: OnNodesChange<Node<EditorNodeData>>;
   onEdgesChange: OnEdgesChange<EditorEdge>;
@@ -45,6 +56,13 @@ type EditorCanvasProps = {
   onViewportChange: (viewport: DiagramViewport) => void;
   onCanvasPlaceNode: (position: { x: number; y: number }) => void;
   onAssetDrop?: (assetId: string, position: { x: number; y: number }) => void;
+  onPenStrokeCreate: (stroke: {
+    color: string;
+    width: number;
+    opacity: number;
+    points: Array<{ x: number; y: number }>;
+  }) => void;
+  onPenStrokeDelete: (strokeId: string) => void;
   onReady?: (instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>) => void;
   onNodeDragStart?: (
     node: Node<EditorNodeData>,
@@ -69,6 +87,11 @@ function EditorCanvasInner({
   snapGuides,
   edgeStyle,
   edgeAnimated,
+  strokes,
+  penBrushColor,
+  penBrushWidth,
+  penBrushOpacity,
+  penEraserEnabled,
   initialViewport,
   onNodesChange,
   onEdgesChange,
@@ -76,6 +99,8 @@ function EditorCanvasInner({
   onViewportChange,
   onCanvasPlaceNode,
   onAssetDrop,
+  onPenStrokeCreate,
+  onPenStrokeDelete,
   onReady,
   onNodeDragStart,
   onNodeDrag,
@@ -102,7 +127,7 @@ function EditorCanvasInner({
     event: ReactMouseEvent,
     instance: ReactFlowInstance<Node<EditorNodeData>, EditorEdge>
   ) => {
-    if (readOnly || activeTool === "select") {
+    if (readOnly || activeTool === "select" || activeTool === "pen") {
       return;
     }
 
@@ -204,6 +229,17 @@ function EditorCanvasInner({
         fitView={nodes.length === 0}
         className="bg-transparent"
       >
+        <PenOverlay
+          strokes={strokes}
+          activeTool={activeTool}
+          readOnly={readOnly}
+          brushColor={penBrushColor}
+          brushWidth={penBrushWidth}
+          brushOpacity={penBrushOpacity}
+          eraserEnabled={penEraserEnabled}
+          onCreateStroke={onPenStrokeCreate}
+          onDeleteStroke={onPenStrokeDelete}
+        />
         {gridVisible ? (
           <Background
             variant={BackgroundVariant.Dots}

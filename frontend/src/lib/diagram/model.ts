@@ -4,6 +4,7 @@ export const diagramNodeTypeSchema = z.enum([
   "rectangle",
   "ellipse",
   "sticky",
+  "textNode",
   "wireframeButton",
   "wireframeInput",
   "wireframeCard",
@@ -18,6 +19,8 @@ export const diagramNodeStyleSchema = z.object({
   fill: z.string().min(1),
   stroke: z.string().min(1),
   textColor: z.string().min(1),
+  strokeWidth: z.number().positive().optional(),
+  fontSize: z.number().positive().optional(),
 });
 export type DiagramNodeStyle = z.infer<typeof diagramNodeStyleSchema>;
 
@@ -84,6 +87,23 @@ export const diagramEdgeRecordSchema = z.object({
 });
 export type DiagramEdgeRecord = z.infer<typeof diagramEdgeRecordSchema>;
 
+export const diagramStrokePointSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+});
+export type DiagramStrokePoint = z.infer<typeof diagramStrokePointSchema>;
+
+export const diagramStrokeSchema = z.object({
+  id: z.string().min(1),
+  layerId: z.string().min(1),
+  color: z.string().min(1),
+  width: z.number().positive(),
+  opacity: z.number().min(0).max(1).optional(),
+  points: z.array(diagramStrokePointSchema).min(1),
+  createdAt: z.number().int().nonnegative().optional(),
+});
+export type DiagramStroke = z.infer<typeof diagramStrokeSchema>;
+
 export const diagramPageSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -93,6 +113,7 @@ export const diagramPageSchema = z.object({
   activeLayerId: z.string().min(1),
   nodes: z.array(diagramNodeRecordSchema),
   edges: z.array(diagramEdgeRecordSchema),
+  strokes: z.array(diagramStrokeSchema).default([]),
 });
 export type DiagramPage = z.infer<typeof diagramPageSchema>;
 

@@ -13,7 +13,7 @@ import {
 } from "@/lib/diagram/api";
 import { isLayerLocked, sortLayers } from "@/lib/diagram/layers";
 import { toFlowEdges, toFlowNodes, type EditorEdge, type EditorNodeData } from "@/lib/diagram/mapper";
-import type { DiagramPage, DiagramViewport } from "@/lib/diagram/types";
+import type { DiagramPage, DiagramStroke, DiagramViewport } from "@/lib/diagram/types";
 
 type ViewerShellProps = {
   diagramId: string;
@@ -179,6 +179,25 @@ export function ViewerShell({ diagramId, pageId }: ViewerShellProps) {
       });
   }, [page, visibleNodes]);
 
+  const visibleStrokes = useMemo(() => {
+    if (!page) {
+      return [] as DiagramStroke[];
+    }
+
+    const sortedLayers = sortLayers(page.layers);
+    const hiddenLayerIds = new Set(
+      sortedLayers.filter((layer) => !layer.isVisible).map((layer) => layer.id)
+    );
+    const layerOrderMap = new Map(sortedLayers.map((layer) => [layer.id, layer.order]));
+
+    return [...page.strokes]
+      .filter((stroke) => !hiddenLayerIds.has(stroke.layerId))
+      .sort(
+        (left, right) =>
+          (layerOrderMap.get(left.layerId) ?? 0) - (layerOrderMap.get(right.layerId) ?? 0)
+      );
+  }, [page]);
+
   const edgeStyle = page?.settings.edgeStyle ?? "smoothstep";
   const edgeAnimated = page?.settings.edgeAnimated ?? false;
   const styledEdges = useMemo(
@@ -228,12 +247,19 @@ export function ViewerShell({ diagramId, pageId }: ViewerShellProps) {
             gridSize={10}
             edgeStyle={edgeStyle}
             edgeAnimated={edgeAnimated}
+            strokes={visibleStrokes}
+            penBrushColor="#111827"
+            penBrushWidth={4}
+            penBrushOpacity={1}
+            penEraserEnabled={false}
             initialViewport={viewport}
             onNodesChange={() => undefined}
             onEdgesChange={() => undefined}
             onConnect={() => undefined}
             onViewportChange={setViewport}
             onCanvasPlaceNode={() => undefined}
+            onPenStrokeCreate={() => undefined}
+            onPenStrokeDelete={() => undefined}
             onLockedNodeInteraction={() => undefined}
           />
         </div>

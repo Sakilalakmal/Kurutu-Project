@@ -104,7 +104,9 @@ export function EditorBottomControls({
     <TooltipProvider>
       <Card
         className={cn(
-          "absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_20px_55px_-45px_rgba(15,23,42,0.7)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90",
+          "absolute right-3 z-20 flex items-center gap-1 rounded-2xl border border-zinc-200/80 bg-white/90 p-2 shadow-[0_20px_55px_-45px_rgba(15,23,42,0.7)] backdrop-blur md:right-4",
+          "bottom-[max(0.75rem,env(safe-area-inset-bottom))] md:bottom-4",
+          "dark:border-zinc-800 dark:bg-zinc-950/90",
           className
         )}
       >

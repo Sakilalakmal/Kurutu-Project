@@ -163,5 +163,6 @@ export const applyTemplate = (
     activeLayerId: resolvedFallbackLayerId,
     nodes,
     edges,
+    strokes: [],
   });
 };

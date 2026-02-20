@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { EditorBottomControls } from "@/components/editor/editor-bottom-controls";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
+import { StylePanel } from "@/components/editor/StylePanel";
 import { TemplatesDialog } from "@/components/editor/TemplatesDialog";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
 import {
@@ -84,6 +85,7 @@ import type {
   DiagramEdgeType,
   DiagramLayer,
   DiagramNodeType,
+  DiagramStroke,
   DiagramPage,
   DiagramSettings,
   DiagramViewport,
@@ -101,6 +103,11 @@ const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `node-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const createStrokeId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `stroke-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const createLayerName = (count: number) => `Layer ${count + 1}`;
 
@@ -213,6 +220,11 @@ export function EditorShell({
   const [flowInstance, setFlowInstance] = useState<
     ReactFlowInstance<Node<EditorNodeData>, EditorEdge> | null
   >(null);
+  const [strokes, setStrokes] = useState<DiagramStroke[]>([]);
+  const [penBrushColor, setPenBrushColor] = useState("#111827");
+  const [penBrushWidth, setPenBrushWidth] = useState(4);
+  const [penBrushOpacity, setPenBrushOpacity] = useState(1);
+  const [penEraserEnabled, setPenEraserEnabled] = useState(false);
 
   const [nodes, setNodes, rawOnNodesChange] = useNodesState<Node<EditorNodeData>>([]);
   const [edges, setEdges, rawOnEdgesChange] = useEdgesState<EditorEdge>([]);
@@ -238,6 +250,7 @@ export function EditorShell({
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const strokesRef = useRef(strokes);
   const viewportRef = useRef(viewport);
   const snapEnabledRef = useRef(snapEnabled);
   const gridSizeRef = useRef(gridSize);
@@ -287,6 +300,10 @@ export function EditorShell({
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
+
+  useEffect(() => {
+    strokesRef.current = strokes;
+  }, [strokes]);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -373,6 +390,7 @@ export function EditorShell({
     (overrides?: Partial<DiagramSnapshot>): DiagramSnapshot => ({
       nodes: overrides?.nodes ?? nodesRef.current,
       edges: overrides?.edges ?? edgesRef.current,
+      strokes: overrides?.strokes ?? strokesRef.current,
       viewport: overrides?.viewport ?? viewportRef.current,
       settings: overrides?.settings ?? buildRuntimeSettings(),
     }),
@@ -418,6 +436,7 @@ export function EditorShell({
                 data: {
                   ...node.data,
                   text: nextText,
+                  autoEdit: false,
                 },
               }
             : node
@@ -446,6 +465,7 @@ export function EditorShell({
           normalizedPage.settings.edgeStyle,
           normalizedPage.settings.edgeAnimated
         ),
+        strokes: normalizedPage.strokes,
         viewport: normalizedPage.viewport,
         settings: normalizedPage.settings,
       };
@@ -465,6 +485,7 @@ export function EditorShell({
 
       setNodes(snapshot.nodes);
       setEdges(normalizedEdges);
+      setStrokes(snapshot.strokes);
       setViewport(snapshot.viewport);
       setCanvasViewport(snapshot.viewport);
       setSnapEnabled(snapshot.settings.snapEnabled);
@@ -477,7 +498,7 @@ export function EditorShell({
         isRestoringHistoryRef.current = false;
       });
     },
-    [flowInstance, setEdges, setNodes]
+    [flowInstance, setEdges, setNodes, setStrokes]
   );
 
   const handleUndo = useCallback(() => {
@@ -523,6 +544,7 @@ export function EditorShell({
 
       setNodes(flowNodes);
       setEdges(flowEdges);
+      setStrokes(normalizedPage.strokes);
       setViewport(normalizedPage.viewport);
       setCanvasViewport(normalizedPage.viewport);
       setSnapEnabled(normalizedPage.settings.snapEnabled);
@@ -532,7 +554,7 @@ export function EditorShell({
       setLayers(sortedLayers);
       setActiveLayerId(resolvedActiveLayerId);
     },
-    [handleNodeTextChange, setEdges, setNodes, showLayerLockedToast]
+    [handleNodeTextChange, setEdges, setNodes, setStrokes, showLayerLockedToast]
   );
 
   const buildRuntimePage = useCallback((basePage: DiagramPage): DiagramPage => {
@@ -560,6 +582,7 @@ export function EditorShell({
       ),
       nodes: pageNodes,
       edges: pageEdges,
+      strokes: strokesRef.current,
     });
   }, []);
 
@@ -736,6 +759,20 @@ export function EditorShell({
     return applyEdgeStyle(filteredEdges, edgeStyle, edgeAnimated);
   }, [edgeAnimated, edgeStyle, edges, hiddenLayerIds, layerOrderMap, visibleNodeIds]);
 
+  const visibleStrokes = useMemo(() => {
+    return strokes
+      .filter((stroke) => !hiddenLayerIds.has(stroke.layerId))
+      .sort(
+        (left, right) =>
+          (layerOrderMap.get(left.layerId) ?? 0) - (layerOrderMap.get(right.layerId) ?? 0)
+      );
+  }, [hiddenLayerIds, layerOrderMap, strokes]);
+
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => node.selected),
+    [nodes]
+  );
+
   const normalizedTitle = title.trim() || "Untitled Diagram";
 
   const activePageName = useMemo(
@@ -756,7 +793,7 @@ export function EditorShell({
   }, [activePageId, diagramId]);
 
   const exportBounds = useMemo(() => {
-    if (visibleNodes.length === 0) {
+    if (visibleNodes.length === 0 && visibleStrokes.length === 0) {
       return null;
     }
 
@@ -774,13 +811,35 @@ export function EditorShell({
       maxY = Math.max(maxY, node.position.y + height);
     });
 
+    visibleStrokes.forEach((stroke) => {
+      if (stroke.points.length === 0) {
+        return;
+      }
+
+      stroke.points.forEach((point) => {
+        minX = Math.min(minX, point.x - stroke.width / 2);
+        minY = Math.min(minY, point.y - stroke.width / 2);
+        maxX = Math.max(maxX, point.x + stroke.width / 2);
+        maxY = Math.max(maxY, point.y + stroke.width / 2);
+      });
+    });
+
+    if (
+      !Number.isFinite(minX) ||
+      !Number.isFinite(minY) ||
+      !Number.isFinite(maxX) ||
+      !Number.isFinite(maxY)
+    ) {
+      return null;
+    }
+
     return {
       x: minX,
       y: minY,
       width: Math.max(maxX - minX, 1),
       height: Math.max(maxY - minY, 1),
     };
-  }, [visibleNodes]);
+  }, [visibleNodes, visibleStrokes]);
 
   const downloadFromDataUrl = useCallback((dataUrl: string, extension: "png" | "svg") => {
     const anchor = document.createElement("a");
@@ -970,6 +1029,7 @@ export function EditorShell({
       activeLayerId: resolvedLayerId,
       nodes: pageNodes,
       edges: pageEdges,
+      strokes,
     });
 
     const mergedPages = upsertPage(pages, activePage).map((page) => ensurePageLayerRefs(page));
@@ -990,6 +1050,7 @@ export function EditorShell({
     layers,
     nodes,
     pages,
+    strokes,
     snapEnabled,
     viewport,
   ]);
@@ -1421,6 +1482,148 @@ export function EditorShell({
     return { normalizedLayers, targetLayerId };
   }, []);
 
+  const updateSelectedNodeStyles = useCallback(
+    (
+      styleUpdate: Partial<EditorNodeData["style"]>,
+      target: "shape" | "text"
+    ) => {
+      if (Object.keys(styleUpdate).length === 0) {
+        return;
+      }
+
+      const selectedNodeIds = new Set(
+        nodesRef.current.filter((node) => node.selected).map((node) => node.id)
+      );
+
+      if (selectedNodeIds.size === 0) {
+        return;
+      }
+
+      let blocked = false;
+
+      setNodes((currentNodes) => {
+        let changed = false;
+
+        const nextNodes = currentNodes.map((node) => {
+          if (!selectedNodeIds.has(node.id)) {
+            return node;
+          }
+
+          const isTextNode = node.type === "textNode";
+
+          if ((target === "shape" && isTextNode) || (target === "text" && !isTextNode)) {
+            return node;
+          }
+
+          if (isLayerLocked(layersRef.current, node.data.layerId)) {
+            blocked = true;
+            return node;
+          }
+
+          const mergedStyle = {
+            ...node.data.style,
+            ...styleUpdate,
+          };
+
+          const styleChanged = (
+            Object.keys(styleUpdate) as Array<keyof EditorNodeData["style"]>
+          ).some((key) => mergedStyle[key] !== node.data.style[key]);
+
+          if (!styleChanged) {
+            return node;
+          }
+
+          changed = true;
+
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              style: mergedStyle,
+            },
+          };
+        });
+
+        if (!changed) {
+          return currentNodes;
+        }
+
+        pushHistorySnapshot({ nodes: nextNodes });
+
+        return nextNodes;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+    },
+    [pushHistorySnapshot, setNodes, showLayerLockedToast]
+  );
+
+  const handlePenStrokeCreate = useCallback(
+    (strokeInput: { color: string; width: number; opacity: number; points: Array<{ x: number; y: number }> }) => {
+      const { normalizedLayers, targetLayerId } = resolveInsertionLayer();
+
+      if (isLayerLocked(normalizedLayers, targetLayerId)) {
+        showLayerLockedToast();
+        return;
+      }
+
+      const normalizedPoints = strokeInput.points.filter(
+        (point) => Number.isFinite(point.x) && Number.isFinite(point.y)
+      );
+
+      if (normalizedPoints.length === 0) {
+        return;
+      }
+
+      const nextStroke: DiagramStroke = {
+        id: createStrokeId(),
+        layerId: targetLayerId,
+        color: strokeInput.color,
+        width: strokeInput.width,
+        opacity: strokeInput.opacity,
+        points: normalizedPoints,
+        createdAt: Date.now(),
+      };
+
+      setStrokes((currentStrokes) => {
+        const nextStrokes = [...currentStrokes, nextStroke];
+        pushHistorySnapshot({ strokes: nextStrokes });
+        return nextStrokes;
+      });
+    },
+    [pushHistorySnapshot, resolveInsertionLayer, showLayerLockedToast]
+  );
+
+  const handlePenStrokeDelete = useCallback(
+    (strokeId: string) => {
+      let blocked = false;
+
+      setStrokes((currentStrokes) => {
+        const targetStroke = currentStrokes.find((stroke) => stroke.id === strokeId);
+
+        if (!targetStroke) {
+          return currentStrokes;
+        }
+
+        if (isLayerLocked(layersRef.current, targetStroke.layerId)) {
+          blocked = true;
+          return currentStrokes;
+        }
+
+        const nextStrokes = currentStrokes.filter((stroke) => stroke.id !== strokeId);
+        pushHistorySnapshot({ strokes: nextStrokes });
+        return nextStrokes;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+    },
+    [pushHistorySnapshot, showLayerLockedToast]
+  );
+
   const insertAssetAtPosition = useCallback(
     (assetId: string, position: { x: number; y: number }) => {
       const asset = getAssetById(assetId);
@@ -1488,7 +1691,7 @@ export function EditorShell({
 
   const handleCanvasPlaceNode = useCallback(
     (position: { x: number; y: number }) => {
-      if (!isPlaceableNodeTool(activeTool)) {
+      if (activeTool !== "text" && !isPlaceableNodeTool(activeTool)) {
         return;
       }
 
@@ -1500,18 +1703,26 @@ export function EditorShell({
       }
 
       const nextPosition = snapEnabled ? snapPosition(position, gridSize) : position;
+      const nodeType: DiagramNodeType = activeTool === "text" ? "textNode" : activeTool;
       const nodeRecord = createDefaultNodeRecord({
         id: createNodeId(),
-        type: activeTool,
+        type: nodeType,
         x: nextPosition.x,
         y: nextPosition.y,
         layerId: targetLayerId,
       });
+      const autoEditNodeId = activeTool === "text" ? nodeRecord.id : null;
 
       setNodes((currentNodes) => {
+        const createdNodes = toFlowNodes(
+          [nodeRecord],
+          handleNodeTextChange,
+          showLayerLockedToast,
+          { autoEditNodeId }
+        );
         const nextNodes = [
           ...currentNodes,
-          ...toFlowNodes([nodeRecord], handleNodeTextChange, showLayerLockedToast),
+          ...createdNodes,
         ];
 
         pushHistorySnapshot({ nodes: nextNodes });
@@ -1745,6 +1956,34 @@ export function EditorShell({
     setLayers((currentLayers) => reorderLayers(currentLayers, layerId, direction));
   }, []);
 
+  const handlePenBrushChange = useCallback(
+    (
+      next: Partial<{
+        color: string;
+        width: number;
+        opacity: number;
+        eraserEnabled: boolean;
+      }>
+    ) => {
+      if (next.color !== undefined) {
+        setPenBrushColor(next.color);
+      }
+
+      if (next.width !== undefined) {
+        setPenBrushWidth(next.width);
+      }
+
+      if (next.opacity !== undefined) {
+        setPenBrushOpacity(Math.max(0.1, Math.min(1, next.opacity)));
+      }
+
+      if (next.eraserEnabled !== undefined) {
+        setPenEraserEnabled(next.eraserEnabled);
+      }
+    },
+    []
+  );
+
   const handleOpenLayersPanel = useCallback(() => {
     if (isMobile) {
       setIsMobileLayersSheetOpen(true);
@@ -1799,11 +2038,32 @@ export function EditorShell({
               isCopyShareSuccess={isCopyShareSuccess}
             />
             <div className="flex min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-5">
-              <EditorToolbar
-                activeTool={activeTool}
-                onToolSelect={setActiveTool}
-                onAssetInsert={handleInsertAssetAtCenter}
-              />
+              <aside className="min-h-0 w-[280px] shrink-0">
+                <div className="flex h-full flex-col gap-3 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  <EditorToolbar
+                    activeTool={activeTool}
+                    onToolSelect={setActiveTool}
+                    onAssetInsert={handleInsertAssetAtCenter}
+                  />
+                  <StylePanel
+                    activeTool={activeTool}
+                    selectedNodes={selectedNodes}
+                    brush={{
+                      color: penBrushColor,
+                      width: penBrushWidth,
+                      opacity: penBrushOpacity,
+                      eraserEnabled: penEraserEnabled,
+                    }}
+                    onBrushChange={handlePenBrushChange}
+                    onUpdateSelectedShapeStyle={(style) =>
+                      updateSelectedNodeStyles(style, "shape")
+                    }
+                    onUpdateSelectedTextStyle={(style) =>
+                      updateSelectedNodeStyles(style, "text")
+                    }
+                  />
+                </div>
+              </aside>
               <div ref={canvasContainerRef} className="relative min-w-0 flex-1">
                 {isLoading ? (
                   <div className="flex h-full w-full items-center justify-center rounded-2xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
@@ -1822,6 +2082,11 @@ export function EditorShell({
                       snapGuides={snapGuides}
                       edgeStyle={edgeStyle}
                       edgeAnimated={edgeAnimated}
+                      strokes={visibleStrokes}
+                      penBrushColor={penBrushColor}
+                      penBrushWidth={penBrushWidth}
+                      penBrushOpacity={penBrushOpacity}
+                      penEraserEnabled={penEraserEnabled}
                       initialViewport={canvasViewport}
                       onNodesChange={handleNodesChange}
                       onEdgesChange={rawOnEdgesChange}
@@ -1829,6 +2094,8 @@ export function EditorShell({
                       onViewportChange={setViewport}
                       onCanvasPlaceNode={handleCanvasPlaceNode}
                       onAssetDrop={handleAssetDrop}
+                      onPenStrokeCreate={handlePenStrokeCreate}
+                      onPenStrokeDelete={handlePenStrokeDelete}
                       onNodeDragStart={handleNodeDragStart}
                       onNodeDrag={handleNodeDrag}
                       onNodeDragStop={handleNodeDragStop}
@@ -1902,7 +2169,8 @@ export function EditorShell({
                     </Button>
                   </div>
                 ) : (
-                  <div className="h-full">
+                  <div className="flex h-full flex-col gap-3">
+                    <div className="min-h-0 flex-1">
                     <LayersPanel
                       layers={layers}
                       activeLayerId={activeLayerId}
@@ -1925,6 +2193,7 @@ export function EditorShell({
                         </Button>
                       }
                     />
+                    </div>
                   </div>
                 )}
               </aside>
@@ -1941,17 +2210,32 @@ export function EditorShell({
           <SheetHeader className="px-1 pb-2">
             <SheetTitle>Layers</SheetTitle>
           </SheetHeader>
-          <div className="h-[calc(100vh-7rem)]">
-            <LayersPanel
-              layers={layers}
-              activeLayerId={activeLayerId}
-              onSelectLayer={handleSelectLayer}
-              onRenameLayer={handleRenameLayer}
-              onToggleVisibility={handleToggleLayerVisibility}
-              onToggleLock={handleToggleLayerLock}
-              onMoveLayer={handleMoveLayer}
-              onAddLayer={handleAddLayer}
+          <div className="flex h-[calc(100vh-7rem)] flex-col gap-3">
+            <StylePanel
+              activeTool={activeTool}
+              selectedNodes={selectedNodes}
+              brush={{
+                color: penBrushColor,
+                width: penBrushWidth,
+                opacity: penBrushOpacity,
+                eraserEnabled: penEraserEnabled,
+              }}
+              onBrushChange={handlePenBrushChange}
+              onUpdateSelectedShapeStyle={(style) => updateSelectedNodeStyles(style, "shape")}
+              onUpdateSelectedTextStyle={(style) => updateSelectedNodeStyles(style, "text")}
             />
+            <div className="min-h-0 flex-1">
+              <LayersPanel
+                layers={layers}
+                activeLayerId={activeLayerId}
+                onSelectLayer={handleSelectLayer}
+                onRenameLayer={handleRenameLayer}
+                onToggleVisibility={handleToggleLayerVisibility}
+                onToggleLock={handleToggleLayerLock}
+                onMoveLayer={handleMoveLayer}
+                onAddLayer={handleAddLayer}
+              />
+            </div>
           </div>
         </SheetContent>
       </Sheet>
