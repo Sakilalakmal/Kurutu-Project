@@ -12,6 +12,7 @@ export {
   diagramNodeTypeSchema,
   diagramPageSchema,
   diagramSettingsSchema,
+  diagramStrokeSchema,
   diagramViewportSchema,
 } from "@/lib/diagram/model";
 
@@ -27,6 +28,7 @@ export type {
   DiagramNodeType,
   DiagramPage,
   DiagramSettings,
+  DiagramStroke,
   DiagramViewport,
 } from "@/lib/diagram/model";
 

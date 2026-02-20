@@ -17,10 +17,13 @@ export type EditorNodeData = {
     fill: string;
     stroke: string;
     textColor: string;
+    strokeWidth?: number;
+    fontSize?: number;
   };
   layerId: string;
   isLocked: boolean;
   isReadOnly: boolean;
+  autoEdit?: boolean;
   onTextChange: (nodeId: string, nextText: string) => void;
   onLockedInteraction: () => void;
 };
@@ -33,6 +36,7 @@ const isDiagramNodeType = (value: string): value is DiagramNodeType =>
   value === "rectangle" ||
   value === "ellipse" ||
   value === "sticky" ||
+  value === "textNode" ||
   value === "wireframeButton" ||
   value === "wireframeInput" ||
   value === "wireframeCard" ||
@@ -45,7 +49,7 @@ export const toFlowNodes = (
   records: DiagramNodeRecord[],
   onTextChange: (nodeId: string, nextText: string) => void,
   onLockedInteraction: () => void,
-  options?: { readOnly?: boolean }
+  options?: { readOnly?: boolean; autoEditNodeId?: string | null }
 ): Node<EditorNodeData>[] =>
   records.map((record) => ({
     id: record.id,
@@ -58,6 +62,7 @@ export const toFlowNodes = (
       layerId: record.layerId,
       isLocked: false,
       isReadOnly: options?.readOnly ?? false,
+      autoEdit: options?.autoEditNodeId === record.id,
       onTextChange,
       onLockedInteraction,
     },

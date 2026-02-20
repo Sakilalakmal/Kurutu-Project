@@ -69,6 +69,7 @@ const migrateLegacyDocument = (
           ...edge,
           layerId: layer.id,
         })),
+        strokes: [],
       },
     ],
   };

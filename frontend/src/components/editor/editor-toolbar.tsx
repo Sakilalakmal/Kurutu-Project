@@ -50,8 +50,8 @@ const tools: Array<{
   { id: "rectangle", label: "Rectangle", icon: Square },
   { id: "ellipse", label: "Ellipse", icon: Circle },
   { id: "sticky", label: "Sticky note", icon: StickyNote },
-  { id: "text", label: "Text (coming soon)", icon: Type, disabled: true },
-  { id: "pen", label: "Pen (coming soon)", icon: PenTool, disabled: true },
+  { id: "text", label: "Text", icon: Type },
+  { id: "pen", label: "Pen", icon: PenTool },
 ];
 
 const groupAssets = (

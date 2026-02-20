@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
+import { TextNode } from "@/components/editor/nodes/TextNode";
 import type { EditorNodeData } from "@/lib/diagram/mapper";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +73,7 @@ function EditableNodeFrame({
         height: data.size.height,
         background: data.style.fill,
         borderColor: data.style.stroke,
+        borderWidth: data.style.strokeWidth ?? 1,
         color: data.style.textColor,
       }}
       onDoubleClick={() => {
@@ -256,6 +258,7 @@ export const editorNodeTypes: NodeTypes = {
   rectangle: RectangleNode,
   ellipse: EllipseNode,
   sticky: StickyNode,
+  textNode: TextNode,
   wireframeButton: WireframeButtonNode,
   wireframeInput: WireframeInputNode,
   wireframeCard: WireframeCardNode,

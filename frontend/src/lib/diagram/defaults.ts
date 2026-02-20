@@ -43,6 +43,12 @@ const DEFAULT_NODE_STYLES: Record<DiagramNodeType, DiagramNodeStyle> = {
     stroke: "#fcd34d",
     textColor: "#1f2937",
   },
+  textNode: {
+    fill: "transparent",
+    stroke: "#00000000",
+    textColor: "#111827",
+    fontSize: 16,
+  },
   wireframeButton: {
     fill: "#f8fafc",
     stroke: "#cbd5e1",
@@ -84,6 +90,7 @@ const DEFAULT_NODE_SIZES: Record<DiagramNodeType, { width: number; height: numbe
   rectangle: { width: 180, height: 92 },
   ellipse: { width: 180, height: 110 },
   sticky: { width: 190, height: 135 },
+  textNode: { width: 220, height: 42 },
   wireframeButton: { width: 144, height: 48 },
   wireframeInput: { width: 220, height: 52 },
   wireframeCard: { width: 280, height: 170 },
@@ -97,6 +104,7 @@ const DEFAULT_NODE_TEXT: Record<DiagramNodeType, string> = {
   rectangle: "Rectangle",
   ellipse: "Ellipse",
   sticky: "Sticky note",
+  textNode: "Text",
   wireframeButton: "Button",
   wireframeInput: "Input",
   wireframeCard: "Card",
@@ -158,6 +166,7 @@ export const createEmptyDiagramDocument = (): DiagramDocument => {
         activeLayerId: layerId,
         nodes: [],
         edges: [],
+        strokes: [],
       },
     ],
   };

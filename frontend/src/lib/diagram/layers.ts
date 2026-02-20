@@ -5,6 +5,7 @@ import type {
   DiagramNodeRecord,
   DiagramPage,
   DiagramSettings,
+  DiagramStroke,
   DiagramViewport,
 } from "@/lib/diagram/model";
 import { DEFAULT_SETTINGS, DEFAULT_VIEWPORT } from "@/lib/diagram/defaults";
@@ -97,6 +98,7 @@ export const createDefaultPage = ({
     activeLayerId: layer.id,
     nodes: [],
     edges: [],
+    strokes: [],
   };
 };
 
@@ -127,12 +129,18 @@ export const ensurePageLayerRefs = (page: DiagramPage): DiagramPage => {
     layerId: layerIds.has(edge.layerId) ? edge.layerId : fallbackLayerId,
   }));
 
+  const normalizedStrokes: DiagramStroke[] = page.strokes.map((stroke) => ({
+    ...stroke,
+    layerId: layerIds.has(stroke.layerId) ? stroke.layerId : fallbackLayerId,
+  }));
+
   return {
     ...page,
     layers: ensuredLayers,
     activeLayerId: resolveActiveLayerId(ensuredLayers, page.activeLayerId),
     nodes: normalizedNodes,
     edges: normalizedEdges,
+    strokes: normalizedStrokes,
   };
 };
 
