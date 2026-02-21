@@ -52,10 +52,11 @@ export const presenceUpdatePayloadSchema = z.object({
   state: z.enum(["online", "viewing"]),
 });
 
-export const diagramPresencePayloadSchema = z.object({
+export const diagramRoomPayloadSchema = z.object({
   workspaceId: z.string().trim().min(1),
   diagramId: z.string().trim().min(1),
 });
+export const diagramPresencePayloadSchema = diagramRoomPayloadSchema;
 
 export const diagramCursorPayloadSchema = z.object({
   workspaceId: z.string().trim().min(1),
@@ -77,13 +78,23 @@ export const diagramSelectionPayloadSchema = z.object({
   selectedNodeIds: z.array(z.string().trim().min(1)).max(500),
 });
 
+export const diagramDocumentUpdatedPayloadSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  diagramId: z.string().trim().min(1),
+  updatedAt: z.string().trim().min(1).optional(),
+});
+
 export type AuthInitPayload = z.infer<typeof authInitPayloadSchema>;
 export type ChatSendPayload = z.infer<typeof chatSendPayloadSchema>;
 export type ThreadTypingPayload = z.infer<typeof threadTypingPayloadSchema>;
 export type PresenceUpdatePayload = z.infer<typeof presenceUpdatePayloadSchema>;
-export type DiagramPresencePayload = z.infer<typeof diagramPresencePayloadSchema>;
+export type DiagramRoomPayload = z.infer<typeof diagramRoomPayloadSchema>;
+export type DiagramPresencePayload = DiagramRoomPayload;
 export type DiagramCursorPayload = z.infer<typeof diagramCursorPayloadSchema>;
 export type DiagramSelectionPayload = z.infer<typeof diagramSelectionPayloadSchema>;
+export type DiagramDocumentUpdatedPayload = z.infer<
+  typeof diagramDocumentUpdatedPayloadSchema
+>;
 
 export type ServerToClientEvents = {
   "chat:newMessage": (payload: {
@@ -109,20 +120,28 @@ export type ServerToClientEvents = {
     color: string;
     x: number;
     y: number;
-    updatedAt: number;
+    t: number;
+    updatedAt?: number;
   }) => void;
   "diagram:selection": (payload: {
     userId: string;
     name: string;
     color: string;
     selectedNodeIds: string[];
-    updatedAt: number;
+    t: number;
+    updatedAt?: number;
   }) => void;
   "diagram:presenceSnapshot": (payload: {
     diagramId: string;
     users: DiagramPresenceUser[];
   }) => void;
   "diagram:userLeft": (payload: { userId: string }) => void;
+  "diagram:documentUpdated": (payload: {
+    workspaceId: string;
+    diagramId: string;
+    updatedAt: string;
+    byUserId: string;
+  }) => void;
 };
 
 export type ClientToServerEvents = {
@@ -140,12 +159,22 @@ export type ClientToServerEvents = {
     payload: PresenceUpdatePayload,
     ack?: (response: RealtimeAck) => void
   ) => void;
-  "diagram:presenceJoin": (
-    payload: DiagramPresencePayload,
+  "diagram:join": (
+    payload: DiagramRoomPayload,
     ack?: (response: RealtimeAck) => void
   ) => void;
+  "diagram:leave": (
+    payload: DiagramRoomPayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  // Deprecated alias. Prefer diagram:join.
+  "diagram:presenceJoin": (
+    payload: DiagramRoomPayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  // Deprecated alias. Prefer diagram:leave.
   "diagram:presenceLeave": (
-    payload: DiagramPresencePayload,
+    payload: DiagramRoomPayload,
     ack?: (response: RealtimeAck) => void
   ) => void;
   "diagram:cursor": (
@@ -154,6 +183,10 @@ export type ClientToServerEvents = {
   ) => void;
   "diagram:selection": (
     payload: DiagramSelectionPayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  "diagram:documentUpdated": (
+    payload: DiagramDocumentUpdatedPayload,
     ack?: (response: RealtimeAck) => void
   ) => void;
 };

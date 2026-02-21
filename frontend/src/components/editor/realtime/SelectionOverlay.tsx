@@ -56,7 +56,7 @@ export function SelectionOverlay({ selections }: SelectionOverlayProps) {
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-30"
+      className="pointer-events-none absolute inset-0 z-[9999]"
       data-transform={transformKey}
     >
       {Array.from(selectionsByNodeId.entries()).map(([nodeId, users]) => {

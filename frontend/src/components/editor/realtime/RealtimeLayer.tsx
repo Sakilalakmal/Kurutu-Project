@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useReactFlow, useStore } from "@xyflow/react";
-import type { DiagramPresenceUser } from "@/lib/realtime/events";
-import { getRealtimeSocket } from "@/lib/realtime/socket";
+import type { DiagramPresenceUser, RealtimeAck } from "@/lib/realtime/events";
+import { getSocket } from "@/lib/realtime/socket";
 import {
   CursorOverlay,
   type RemoteCursorPresence,
@@ -29,6 +29,12 @@ const normalizeNodeIds = (nodeIds: string[]) => Array.from(new Set(nodeIds)).sor
 const hasLocalAccess = (focused: boolean, pointerOverCanvas: boolean) =>
   focused || pointerOverCanvas;
 
+const devLog = (...args: unknown[]) => {
+  if (process.env.NODE_ENV === "development") {
+    console.log(...args);
+  }
+};
+
 export function RealtimeLayer({
   workspaceId,
   diagramId,
@@ -38,7 +44,7 @@ export function RealtimeLayer({
 }: RealtimeLayerProps) {
   const reactFlow = useReactFlow();
   const domNode = useStore((state) => state.domNode);
-  const socket = useMemo(() => getRealtimeSocket(), []);
+  const socket = useMemo(() => getSocket(), []);
   const normalizedSelectedNodeIds = useMemo(
     () => normalizeNodeIds(selectedNodeIds),
     [selectedNodeIds]
@@ -54,6 +60,9 @@ export function RealtimeLayer({
   const pendingCursorPointRef = useRef<{ x: number; y: number } | null>(null);
   const cursorEmitRafRef = useRef<number | null>(null);
   const lastCursorEmitAtRef = useRef(0);
+  const lastCursorDebugLogAtRef = useRef(0);
+  const incomingCursorCountRef = useRef(0);
+  const lastIncomingCursorDebugLogAtRef = useRef(0);
   const [remoteCursors, setRemoteCursors] = useState<RemoteCursorPresence[]>([]);
   const [remoteSelections, setRemoteSelections] = useState<RemoteSelectionPresence[]>([]);
   const [presenceUsers, setPresenceUsers] = useState<DiagramPresenceUser[]>([]);
@@ -136,6 +145,13 @@ export function RealtimeLayer({
       return;
     }
 
+    const handleRealtimeAck = (eventName: string) => (response: RealtimeAck) => {
+      if (!response.ok) {
+        devLog(`${eventName} ack error`, response);
+      }
+    };
+    const handleCursorAck = handleRealtimeAck("diagram:cursor");
+
     const emitCursorFrame = () => {
       if (!hasLocalAccess(windowFocusedRef.current, pointerOverCanvasRef.current)) {
         pendingCursorPointRef.current = null;
@@ -162,12 +178,17 @@ export function RealtimeLayer({
       cursorEmitRafRef.current = null;
       lastCursorEmitAtRef.current = now;
 
+      if (now - lastCursorDebugLogAtRef.current >= 1_000) {
+        devLog("emit cursor", { x: flowPoint.x, y: flowPoint.y });
+        lastCursorDebugLogAtRef.current = now;
+      }
+
       socket.emit("diagram:cursor", {
         workspaceId,
         diagramId,
         x: flowPoint.x,
         y: flowPoint.y,
-      });
+      }, handleCursorAck);
     };
 
     const handlePointerEnter = () => {
@@ -206,16 +227,27 @@ export function RealtimeLayer({
   }, [diagramId, domNode, reactFlow, socket, workspaceId]);
 
   useEffect(() => {
+    const handleRealtimeAck = (eventName: string) => (response: RealtimeAck) => {
+      if (!response.ok) {
+        devLog(`${eventName} ack error`, response);
+      }
+    };
+
     const joinRoom = () => {
-      socket.emit("diagram:presenceJoin", {
+      devLog("join room", {
         workspaceId,
         diagramId,
+        room: `ws:${workspaceId}:diagram:${diagramId}`,
       });
+      socket.emit("diagram:join", {
+        workspaceId,
+        diagramId,
+      }, handleRealtimeAck("diagram:join"));
       socket.emit("diagram:selection", {
         workspaceId,
         diagramId,
         selectedNodeIds: selectedNodeIdsRef.current,
-      });
+      }, handleRealtimeAck("diagram:selection"));
     };
 
     const handlePresenceSnapshot = (payload: {
@@ -244,16 +276,46 @@ export function RealtimeLayer({
       scheduleVisualStateFlush();
     };
 
-    const handleCursor = (payload: RemoteCursorPresence) => {
+    const handleCursor = (payload: {
+      userId: string;
+      name: string;
+      color: string;
+      x: number;
+      y: number;
+      t?: number;
+      updatedAt?: number;
+    }) => {
+      incomingCursorCountRef.current += 1;
+      const now = Date.now();
+      if (now - lastIncomingCursorDebugLogAtRef.current >= 1_000) {
+        devLog("incoming cursor events/s", incomingCursorCountRef.current);
+        incomingCursorCountRef.current = 0;
+        lastIncomingCursorDebugLogAtRef.current = now;
+      }
+
       if (payload.userId === currentUserId) {
         return;
       }
 
-      cursorByUserIdRef.current.set(payload.userId, payload);
+      cursorByUserIdRef.current.set(payload.userId, {
+        userId: payload.userId,
+        name: payload.name,
+        color: payload.color,
+        x: payload.x,
+        y: payload.y,
+        updatedAt: payload.t ?? payload.updatedAt ?? now,
+      });
       scheduleVisualStateFlush();
     };
 
-    const handleSelection = (payload: RemoteSelectionPresence) => {
+    const handleSelection = (payload: {
+      userId: string;
+      name: string;
+      color: string;
+      selectedNodeIds: string[];
+      t?: number;
+      updatedAt?: number;
+    }) => {
       if (payload.userId === currentUserId) {
         return;
       }
@@ -262,8 +324,11 @@ export function RealtimeLayer({
         selectionByUserIdRef.current.delete(payload.userId);
       } else {
         selectionByUserIdRef.current.set(payload.userId, {
-          ...payload,
+          userId: payload.userId,
+          name: payload.name,
+          color: payload.color,
           selectedNodeIds: normalizeNodeIds(payload.selectedNodeIds),
+          updatedAt: payload.t ?? payload.updatedAt ?? Date.now(),
         });
       }
 
@@ -283,7 +348,17 @@ export function RealtimeLayer({
       clearPresenceState();
     };
 
-    socket.on("connect", joinRoom);
+    const handleConnect = () => {
+      devLog("socket connected", socket.id);
+      joinRoom();
+    };
+
+    const handleConnectError = (error: Error) => {
+      devLog("socket connect_error", error.message);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("connect_error", handleConnectError);
     socket.on("disconnect", handleDisconnect);
     socket.on("diagram:presenceSnapshot", handlePresenceSnapshot);
     socket.on("diagram:cursor", handleCursor);
@@ -291,15 +366,16 @@ export function RealtimeLayer({
     socket.on("diagram:userLeft", handleUserLeft);
 
     if (socket.connected) {
-      joinRoom();
+      handleConnect();
     }
 
     return () => {
-      socket.emit("diagram:presenceLeave", {
+      socket.emit("diagram:leave", {
         workspaceId,
         diagramId,
-      });
-      socket.off("connect", joinRoom);
+      }, handleRealtimeAck("diagram:leave"));
+      socket.off("connect", handleConnect);
+      socket.off("connect_error", handleConnectError);
       socket.off("disconnect", handleDisconnect);
       socket.off("diagram:presenceSnapshot", handlePresenceSnapshot);
       socket.off("diagram:cursor", handleCursor);
@@ -321,11 +397,17 @@ export function RealtimeLayer({
       return;
     }
 
+    const handleRealtimeAck = (response: RealtimeAck) => {
+      if (!response.ok) {
+        devLog("diagram:selection ack error", response);
+      }
+    };
+
     socket.emit("diagram:selection", {
       workspaceId,
       diagramId,
       selectedNodeIds: normalizedSelectedNodeIds,
-    });
+    }, handleRealtimeAck);
   }, [diagramId, normalizedSelectedNodeIds, socket, workspaceId]);
 
   useEffect(() => {

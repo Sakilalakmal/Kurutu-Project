@@ -60,7 +60,7 @@ export function CursorOverlay({ cursors }: CursorOverlayProps) {
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-40"
+      className="pointer-events-none absolute inset-0 z-[9999]"
       data-transform={transformKey}
     >
       {cursors.map((cursor) => {
@@ -118,4 +118,3 @@ export function CursorOverlay({ cursors }: CursorOverlayProps) {
     </div>
   );
 }
-

@@ -39,6 +39,7 @@ import { getTemplateById, TEMPLATE_LIBRARY } from "@/lib/assets/templates";
 import { applyEdgeStyle, EDGE_STYLE_OPTIONS, toRuntimeEdgeType } from "@/lib/diagram/edges";
 import {
   DiagramApiError,
+  type DiagramDto,
   fetchDiagramById,
   fetchLatestDiagram,
   updateDiagram,
@@ -82,7 +83,7 @@ import {
 } from "@/lib/diagram/mapper";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
 import type { DiagramPresenceUser } from "@/lib/realtime/events";
-import { getRealtimeSocket } from "@/lib/realtime/socket";
+import { getSocket } from "@/lib/realtime/socket";
 import { snapPosition } from "@/lib/diagram/snap";
 import {
   buildSnapTargets,
@@ -231,6 +232,7 @@ export function EditorShell({
     initialWorkspaceId
   );
   const [diagramId, setDiagramId] = useState<string | null>(null);
+  const [diagramWorkspaceId, setDiagramWorkspaceId] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled Diagram");
   const [isPublic, setIsPublic] = useState(false);
   const [pages, setPages] = useState<DiagramPage[]>([]);
@@ -289,12 +291,14 @@ export function EditorShell({
   const emptyDocumentRef = useRef(createEmptyDiagramDocument());
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTemplateFitRef = useRef(false);
+  const hasPendingRemoteSyncNoticeRef = useRef(false);
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const snapTargetsRef = useRef<SnapTargets | null>(null);
   const activeDragNodeIdRef = useRef<string | null>(null);
   const dragSmartEnabledRef = useRef(false);
   const hasLoadedSidebarPreferenceRef = useRef(false);
   const isMobile = useIsMobile();
+  const realtimeWorkspaceId = diagramId ? diagramWorkspaceId : currentWorkspaceId;
 
   useEffect(() => {
     setCurrentWorkspaceId(initialWorkspaceId);
@@ -326,35 +330,31 @@ export function EditorShell({
   }, [currentWorkspaceId]);
 
   useEffect(() => {
-    if (!initialUserId || !currentWorkspaceId) {
+    if (!initialUserId || !realtimeWorkspaceId) {
       return;
     }
 
-    const socket = getRealtimeSocket();
+    const socket = getSocket();
 
-    if (!socket.connected) {
+    if (!socket.connected && !socket.active) {
       socket.connect();
     }
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [currentWorkspaceId, initialUserId]);
+  }, [initialUserId, realtimeWorkspaceId]);
 
   useEffect(() => {
-    if (!initialUserId || !currentWorkspaceId) {
+    if (!initialUserId || !realtimeWorkspaceId) {
       return;
     }
 
-    const socket = getRealtimeSocket();
+    const socket = getSocket();
 
     const emitPresenceState = () => {
       socket.emit("auth:init", {
-        workspaceId: currentWorkspaceId,
+        workspaceId: realtimeWorkspaceId,
         diagramId: diagramId ?? undefined,
       });
       socket.emit("presence:update", {
-        workspaceId: currentWorkspaceId,
+        workspaceId: realtimeWorkspaceId,
         diagramId: diagramId ?? undefined,
         state: diagramId ? "viewing" : "online",
       });
@@ -369,13 +369,13 @@ export function EditorShell({
     return () => {
       socket.off("connect", emitPresenceState);
     };
-  }, [currentWorkspaceId, diagramId, initialUserId]);
+  }, [diagramId, initialUserId, realtimeWorkspaceId]);
 
   useEffect(() => {
-    if (!initialUserId || !currentWorkspaceId || !diagramId) {
+    if (!initialUserId || !realtimeWorkspaceId || !diagramId) {
       setDiagramPresenceUsers([]);
     }
-  }, [currentWorkspaceId, diagramId, initialUserId]);
+  }, [diagramId, initialUserId, realtimeWorkspaceId]);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -1067,6 +1067,71 @@ export function EditorShell({
     [buildRuntimePage]
   );
 
+  const applyLoadedDiagram = useCallback(
+    (
+      diagram: DiagramDto,
+      options?: {
+        syncWorkspaceFromDiagram?: boolean;
+        preferredPageId?: string | null;
+      }
+    ) => {
+      const migrated = migrateDiagramData(diagram.data);
+      const normalizedPages = migrated.pages.map((page) => ensurePageLayerRefs(page));
+      const fallbackActivePageId = normalizedPages.some(
+        (page) => page.id === migrated.activePageId
+      )
+        ? migrated.activePageId
+        : normalizedPages[0].id;
+      const preferredPageId = options?.preferredPageId ?? null;
+      const resolvedActivePageId =
+        preferredPageId && normalizedPages.some((page) => page.id === preferredPageId)
+          ? preferredPageId
+          : fallbackActivePageId;
+      const activePage =
+        normalizedPages.find((page) => page.id === resolvedActivePageId) ?? normalizedPages[0];
+      const loadedTitle = diagram.title.trim().length > 0 ? diagram.title : "Untitled Diagram";
+
+      if (options?.syncWorkspaceFromDiagram) {
+        setCurrentWorkspaceId(diagram.workspaceId ?? null);
+      }
+
+      setDiagramId(diagram.id);
+      setDiagramWorkspaceId(diagram.workspaceId ?? null);
+      setTitle(loadedTitle);
+      setIsPublic(diagram.isPublic);
+      setPages(normalizedPages);
+      setActivePageId(resolvedActivePageId);
+      hydratePage(activePage);
+      setCanvasMountKey((previous) => previous + 1);
+      setLastSavedAt(diagram.updatedAt);
+      setSaveStatus("saved");
+
+      const nextHistories: Record<string, ReturnType<typeof createHistory>> = {};
+      normalizedPages.forEach((page) => {
+        nextHistories[page.id] = createHistory(createPageSnapshot(page));
+      });
+      historiesRef.current = nextHistories;
+      syncHistoryAvailability(resolvedActivePageId);
+
+      const loadedData = {
+        dataVersion: 2 as const,
+        activePageId: resolvedActivePageId,
+        pages: normalizedPages,
+      };
+
+      lastSavedSignatureRef.current = JSON.stringify({
+        title: loadedTitle,
+        data: loadedData,
+      });
+      currentSignatureRef.current = lastSavedSignatureRef.current;
+      previousSignatureRef.current = lastSavedSignatureRef.current;
+      changeVersionRef.current = 0;
+      hasHydratedRef.current = true;
+      hasPendingRemoteSyncNoticeRef.current = false;
+    },
+    [createPageSnapshot, hydratePage, syncHistoryAvailability]
+  );
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -1099,51 +1164,9 @@ export function EditorShell({
           return;
         }
 
-        const migrated = migrateDiagramData(diagram.data);
-        const normalizedPages = migrated.pages.map((page) => ensurePageLayerRefs(page));
-        const resolvedActivePageId = normalizedPages.some(
-          (page) => page.id === migrated.activePageId
-        )
-          ? migrated.activePageId
-          : normalizedPages[0].id;
-        const activePage =
-          normalizedPages.find((page) => page.id === resolvedActivePageId) ?? normalizedPages[0];
-        const loadedTitle = diagram.title.trim().length > 0 ? diagram.title : "Untitled Diagram";
-
-        if (initialDiagramId) {
-          setCurrentWorkspaceId(diagram.workspaceId ?? null);
-        }
-        setDiagramId(diagram.id);
-        setTitle(loadedTitle);
-        setIsPublic(diagram.isPublic);
-        setPages(normalizedPages);
-        setActivePageId(resolvedActivePageId);
-        hydratePage(activePage);
-        setCanvasMountKey((previous) => previous + 1);
-        setLastSavedAt(diagram.updatedAt);
-        setSaveStatus("saved");
-
-        const nextHistories: Record<string, ReturnType<typeof createHistory>> = {};
-        normalizedPages.forEach((page) => {
-          nextHistories[page.id] = createHistory(createPageSnapshot(page));
+        applyLoadedDiagram(diagram, {
+          syncWorkspaceFromDiagram: Boolean(initialDiagramId),
         });
-        historiesRef.current = nextHistories;
-        syncHistoryAvailability(resolvedActivePageId);
-
-        const loadedData = {
-          dataVersion: 2 as const,
-          activePageId: resolvedActivePageId,
-          pages: normalizedPages,
-        };
-
-        lastSavedSignatureRef.current = JSON.stringify({
-          title: loadedTitle,
-          data: loadedData,
-        });
-        currentSignatureRef.current = lastSavedSignatureRef.current;
-        previousSignatureRef.current = lastSavedSignatureRef.current;
-        changeVersionRef.current = 0;
-        hasHydratedRef.current = true;
       } catch (error) {
         toast.error(
           error instanceof Error ? error.message : "Failed to load your latest diagram."
@@ -1161,12 +1184,76 @@ export function EditorShell({
       isCancelled = true;
     };
   }, [
-    createPageSnapshot,
+    applyLoadedDiagram,
     currentWorkspaceId,
-    hydratePage,
     initialDiagramId,
-    syncHistoryAvailability,
   ]);
+
+  useEffect(() => {
+    if (!initialUserId || !diagramId || !diagramWorkspaceId) {
+      return;
+    }
+
+    const socket = getSocket();
+    let isCancelled = false;
+
+    const handleDiagramDocumentUpdated = (payload: {
+      workspaceId: string;
+      diagramId: string;
+      updatedAt: string;
+      byUserId: string;
+    }) => {
+      if (payload.workspaceId !== diagramWorkspaceId || payload.diagramId !== diagramId) {
+        return;
+      }
+
+      if (payload.byUserId === initialUserId) {
+        return;
+      }
+
+      const hasLocalUnsavedChanges =
+        currentSignatureRef.current !== lastSavedSignatureRef.current || saveStatus === "saving";
+
+      if (hasLocalUnsavedChanges) {
+        if (!hasPendingRemoteSyncNoticeRef.current) {
+          hasPendingRemoteSyncNoticeRef.current = true;
+          toast("Remote changes detected. Save your changes to sync.");
+        }
+        return;
+      }
+
+      void (async () => {
+        try {
+          const latestDiagram = await fetchDiagramById(diagramId);
+
+          if (isCancelled) {
+            return;
+          }
+
+          applyLoadedDiagram(latestDiagram, {
+            preferredPageId: activePageIdRef.current,
+          });
+        } catch (error) {
+          if (isCancelled) {
+            return;
+          }
+
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Failed to sync remote diagram changes."
+          );
+        }
+      })();
+    };
+
+    socket.on("diagram:documentUpdated", handleDiagramDocumentUpdated);
+
+    return () => {
+      isCancelled = true;
+      socket.off("diagram:documentUpdated", handleDiagramDocumentUpdated);
+    };
+  }, [applyLoadedDiagram, diagramId, diagramWorkspaceId, initialUserId, saveStatus]);
 
   useEffect(() => {
     return () => {
@@ -1748,11 +1835,24 @@ export function EditorShell({
       setLastSavedAt(updated.updatedAt);
       setIsPublic(updated.isPublic);
       setSaveStatus("saved");
+      hasPendingRemoteSyncNoticeRef.current = false;
+
+      if (diagramWorkspaceId) {
+        const socket = getSocket();
+
+        if (socket.connected) {
+          socket.emit("diagram:documentUpdated", {
+            workspaceId: diagramWorkspaceId,
+            diagramId,
+            updatedAt: updated.updatedAt,
+          });
+        }
+      }
     } catch (error) {
       setSaveStatus("error");
       toast.error(error instanceof Error ? error.message : "Failed to save diagram.");
     }
-  }, [currentSignature, diagramDocument, diagramId, normalizedTitle]);
+  }, [currentSignature, diagramDocument, diagramId, diagramWorkspaceId, normalizedTitle]);
 
   useEffect(() => {
     if (!hasHydratedRef.current || !diagramId || isLoading) {
@@ -2827,9 +2927,9 @@ export function EditorShell({
                       onReady={setFlowInstance}
                       onLockedNodeInteraction={showLayerLockedToast}
                       realtime={
-                        initialUserId && currentWorkspaceId && diagramId
+                        initialUserId && diagramWorkspaceId && diagramId
                           ? {
-                              workspaceId: currentWorkspaceId,
+                              workspaceId: diagramWorkspaceId,
                               diagramId,
                               currentUserId: initialUserId,
                               selectedNodeIds,
