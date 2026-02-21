@@ -7,6 +7,7 @@ import {
 
 const diagramDtoSchema = z.object({
   id: z.string().min(1),
+  workspaceId: z.string().nullable().optional(),
   title: z.string(),
   isPublic: z.boolean(),
   data: diagramDocumentSchema,
@@ -59,8 +60,15 @@ const extractErrorMessage = async (response: Response): Promise<string> => {
   }
 };
 
-export const fetchLatestDiagram = async (): Promise<DiagramDto> => {
-  const response = await fetch("/api/diagrams/latest", {
+export const fetchLatestDiagram = async ({
+  workspaceId,
+}: {
+  workspaceId?: string | null;
+} = {}): Promise<DiagramDto> => {
+  const query = workspaceId
+    ? `?workspaceId=${encodeURIComponent(workspaceId)}`
+    : "";
+  const response = await fetch(`/api/diagrams/latest${query}`, {
     method: "GET",
     cache: "no-store",
   });

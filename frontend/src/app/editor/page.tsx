@@ -5,7 +5,9 @@ import { EditorShell } from "@/components/editor/editor-shell";
 export default async function EditorPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ diagramId?: string }> | { diagramId?: string };
+  searchParams?:
+    | Promise<{ diagramId?: string; workspaceId?: string }>
+    | { diagramId?: string; workspaceId?: string };
 }) {
   const session = await getServerSession();
 
@@ -15,6 +17,12 @@ export default async function EditorPage({
 
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const requestedDiagramId = resolvedSearchParams.diagramId?.trim() || null;
+  const requestedWorkspaceId = resolvedSearchParams.workspaceId?.trim() || null;
 
-  return <EditorShell initialDiagramId={requestedDiagramId} />;
+  return (
+    <EditorShell
+      initialDiagramId={requestedDiagramId}
+      initialWorkspaceId={requestedWorkspaceId}
+    />
+  );
 }
