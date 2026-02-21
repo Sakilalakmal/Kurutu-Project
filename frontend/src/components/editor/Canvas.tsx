@@ -21,11 +21,13 @@ import {
 } from "@xyflow/react";
 import { editorEdgeTypes } from "@/components/editor/edges";
 import { editorNodeTypes } from "@/components/editor/nodes";
+import { RealtimeLayer } from "@/components/editor/realtime/RealtimeLayer";
 import { PenOverlay } from "@/components/editor/PenOverlay";
 import { SnapGuidesOverlay } from "@/components/editor/SnapGuidesOverlay";
 import { ASSET_DRAG_MIME } from "@/lib/assets/catalog";
 import { toConnectionLineType, toRuntimeEdgeType } from "@/lib/diagram/edges";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
+import type { DiagramPresenceUser } from "@/lib/realtime/events";
 import type { SnapGuides } from "@/lib/diagram/smartSnap";
 import type {
   DiagramEdgeType,
@@ -77,6 +79,13 @@ type EditorCanvasProps = {
   onNodeHoverChange?: (nodeId: string | null) => void;
   onEdgeHoverChange?: (edgeId: string | null) => void;
   onLockedNodeInteraction: () => void;
+  realtime?: {
+    workspaceId: string;
+    diagramId: string;
+    currentUserId: string;
+    selectedNodeIds: string[];
+    onPresenceUsersChange?: (users: DiagramPresenceUser[]) => void;
+  };
 };
 
 function EditorCanvasInner({
@@ -111,6 +120,7 @@ function EditorCanvasInner({
   onNodeHoverChange,
   onEdgeHoverChange,
   onLockedNodeInteraction,
+  realtime,
 }: EditorCanvasProps) {
   const interactiveSelection = !readOnly && activeTool === "select";
   const [flowInstance, setFlowInstance] = useState<
@@ -263,6 +273,15 @@ function EditorCanvasInner({
           />
         ) : null}
         <SnapGuidesOverlay guides={snapGuides} />
+        {realtime ? (
+          <RealtimeLayer
+            workspaceId={realtime.workspaceId}
+            diagramId={realtime.diagramId}
+            currentUserId={realtime.currentUserId}
+            selectedNodeIds={realtime.selectedNodeIds}
+            onPresenceUsersChange={realtime.onPresenceUsersChange}
+          />
+        ) : null}
       </ReactFlow>
     </div>
   );

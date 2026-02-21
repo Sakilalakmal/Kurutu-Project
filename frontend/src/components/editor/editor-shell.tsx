@@ -81,6 +81,7 @@ import {
   type EditorNodeData,
 } from "@/lib/diagram/mapper";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
+import type { DiagramPresenceUser } from "@/lib/realtime/events";
 import { getRealtimeSocket } from "@/lib/realtime/socket";
 import { snapPosition } from "@/lib/diagram/snap";
 import {
@@ -271,6 +272,7 @@ export function EditorShell({
   const [penBrushWidth, setPenBrushWidth] = useState(4);
   const [penBrushOpacity, setPenBrushOpacity] = useState(1);
   const [penEraserEnabled, setPenEraserEnabled] = useState(false);
+  const [diagramPresenceUsers, setDiagramPresenceUsers] = useState<DiagramPresenceUser[]>([]);
 
   const [nodes, setNodes, rawOnNodesChange] = useNodesState<Node<EditorNodeData>>([]);
   const [edges, setEdges, rawOnEdgesChange] = useEdgesState<EditorEdge>([]);
@@ -367,6 +369,12 @@ export function EditorShell({
     return () => {
       socket.off("connect", emitPresenceState);
     };
+  }, [currentWorkspaceId, diagramId, initialUserId]);
+
+  useEffect(() => {
+    if (!initialUserId || !currentWorkspaceId || !diagramId) {
+      setDiagramPresenceUsers([]);
+    }
   }, [currentWorkspaceId, diagramId, initialUserId]);
 
   const nodesRef = useRef(nodes);
@@ -1392,6 +1400,10 @@ export function EditorShell({
   const selectedNodes = useMemo(
     () => nodes.filter((node) => node.selected),
     [nodes]
+  );
+  const selectedNodeIds = useMemo(
+    () => selectedNodes.map((node) => node.id),
+    [selectedNodes]
   );
 
   const normalizedTitle = title.trim() || "Untitled Diagram";
@@ -2728,6 +2740,7 @@ export function EditorShell({
               onToggleShare={handleToggleShare}
               onCopyShareUrl={handleCopyShareUrl}
               isCopyShareSuccess={isCopyShareSuccess}
+              diagramPresenceUsers={diagramPresenceUsers}
             />
             <div className="border-b border-zinc-200/70 bg-white/70 px-3 py-1.5 dark:border-zinc-800/70 dark:bg-zinc-950/70 sm:px-5">
               <div className="flex items-center gap-2 text-xs">
@@ -2813,6 +2826,17 @@ export function EditorShell({
                       onEdgeHoverChange={setHoveredEdgeId}
                       onReady={setFlowInstance}
                       onLockedNodeInteraction={showLayerLockedToast}
+                      realtime={
+                        initialUserId && currentWorkspaceId && diagramId
+                          ? {
+                              workspaceId: currentWorkspaceId,
+                              diagramId,
+                              currentUserId: initialUserId,
+                              selectedNodeIds,
+                              onPresenceUsersChange: setDiagramPresenceUsers,
+                            }
+                          : undefined
+                      }
                     />
                     <EditorBottomControls
                       zoom={viewport.zoom}

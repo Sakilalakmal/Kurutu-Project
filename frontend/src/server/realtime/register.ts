@@ -1,11 +1,15 @@
 import {
   authInitPayloadSchema,
   chatSendPayloadSchema,
+  diagramCursorPayloadSchema,
+  diagramPresencePayloadSchema,
+  diagramSelectionPayloadSchema,
   presenceUpdatePayloadSchema,
   threadTypingPayloadSchema,
   type RealtimeAck,
 } from "../../lib/realtime/events";
 import { createMessage, isChatServiceError } from "../../lib/chat/server";
+import { getUserPresenceColor } from "../../lib/realtime/colors";
 import { resolveSocketUser } from "./auth";
 import {
   isRealtimeAuthzError,
@@ -14,6 +18,7 @@ import {
   requireThreadAccess,
   requireWorkspaceMember,
 } from "./authz";
+import { DiagramPresenceManager } from "./diagram-presence";
 import { PresenceManager } from "./presence";
 import { toDiagramRoom, toThreadRoom, toWorkspaceRoom } from "./rooms";
 import { TypingManager } from "./typing";
@@ -21,6 +26,7 @@ import type { RealtimeServer, RealtimeSocket } from "./types";
 
 const presenceManager = new PresenceManager();
 const typingManager = new TypingManager();
+const diagramPresenceManager = new DiagramPresenceManager();
 
 const respond = (ack: ((response: RealtimeAck) => void) | undefined, response: RealtimeAck) => {
   ack?.(response);
@@ -52,6 +58,52 @@ const emitTypingStops = (
       isTyping: false,
     });
   }
+};
+
+const emitDiagramPresenceSnapshot = (
+  io: RealtimeServer,
+  context: { workspaceId: string; diagramId: string }
+) => {
+  const roomId = toDiagramRoom(context.workspaceId, context.diagramId);
+  const snapshot = diagramPresenceManager.getSnapshot(roomId);
+
+  if (!snapshot) {
+    return;
+  }
+
+  io.to(roomId).emit("diagram:presenceSnapshot", snapshot);
+};
+
+const removeSocketFromDiagramRoom = (
+  io: RealtimeServer,
+  params: {
+    workspaceId: string;
+    diagramId: string;
+    socketId: string;
+    userId: string;
+  }
+) => {
+  const roomId = toDiagramRoom(params.workspaceId, params.diagramId);
+  const removalResult = diagramPresenceManager.removeSocketFromRoom(
+    {
+      roomId,
+      workspaceId: params.workspaceId,
+      diagramId: params.diagramId,
+    },
+    {
+      socketId: params.socketId,
+      userId: params.userId,
+    }
+  );
+
+  if (removalResult.userLeft) {
+    io.to(roomId).emit("diagram:userLeft", { userId: params.userId });
+  }
+
+  emitDiagramPresenceSnapshot(io, {
+    workspaceId: params.workspaceId,
+    diagramId: params.diagramId,
+  });
 };
 
 const resetSocketContext = (socket: RealtimeSocket) => {
@@ -143,6 +195,23 @@ export const registerRealtimeHandlers = (io: RealtimeServer) => {
           emitTypingStops(io, stoppedTyping);
         }
 
+        const hasDiagramContextChanged =
+          previousContext.previousWorkspaceId !== workspaceId ||
+          (previousContext.previousDiagramId ?? null) !== (diagramId ?? null);
+
+        if (
+          hasDiagramContextChanged &&
+          previousContext.previousWorkspaceId &&
+          previousContext.previousDiagramId
+        ) {
+          removeSocketFromDiagramRoom(io, {
+            workspaceId: previousContext.previousWorkspaceId,
+            diagramId: previousContext.previousDiagramId,
+            socketId: socket.id,
+            userId: socket.data.userId,
+          });
+        }
+
         socket.join(toWorkspaceRoom(workspaceId));
 
         if (diagramId) {
@@ -227,6 +296,19 @@ export const registerRealtimeHandlers = (io: RealtimeServer) => {
           socket.leave(toDiagramRoom(previousWorkspaceId, previousDiagramId));
         }
 
+        if (
+          previousWorkspaceId &&
+          previousDiagramId &&
+          (previousWorkspaceId !== workspaceId || previousDiagramId !== resolvedDiagramId)
+        ) {
+          removeSocketFromDiagramRoom(io, {
+            workspaceId: previousWorkspaceId,
+            diagramId: previousDiagramId,
+            socketId: socket.id,
+            userId: socket.data.userId,
+          });
+        }
+
         socket.join(toWorkspaceRoom(workspaceId));
 
         if (resolvedDiagramId) {
@@ -273,6 +355,233 @@ export const registerRealtimeHandlers = (io: RealtimeServer) => {
         }
 
         respond(ack, { ok: false, error: "Failed to update presence.", code: "INTERNAL" });
+      }
+    });
+
+    socket.on("diagram:presenceJoin", async (payload, ack) => {
+      const parsedPayload = diagramPresencePayloadSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        respond(ack, {
+          ok: false,
+          error: "Invalid diagram presence payload.",
+          code: "INVALID_PAYLOAD",
+        });
+        return;
+      }
+
+      const { workspaceId, diagramId } = parsedPayload.data;
+      const roomId = toDiagramRoom(workspaceId, diagramId);
+
+      try {
+        await requireWorkspaceMember(workspaceId, socket.data.userId);
+        await requireDiagramInWorkspace(workspaceId, diagramId);
+
+        socket.join(roomId);
+
+        diagramPresenceManager.upsertPresence(
+          {
+            roomId,
+            workspaceId,
+            diagramId,
+          },
+          {
+            socketId: socket.id,
+            userId: socket.data.userId,
+            name: socket.data.name,
+            color: getUserPresenceColor(socket.data.userId),
+          }
+        );
+
+        emitDiagramPresenceSnapshot(io, { workspaceId, diagramId });
+        respond(ack, { ok: true });
+      } catch (error) {
+        if (isRealtimeAuthzError(error)) {
+          respond(ack, { ok: false, error: error.message, code: error.code });
+          return;
+        }
+
+        respond(ack, {
+          ok: false,
+          error: "Failed to join diagram presence.",
+          code: "INTERNAL",
+        });
+      }
+    });
+
+    socket.on("diagram:presenceLeave", async (payload, ack) => {
+      const parsedPayload = diagramPresencePayloadSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        respond(ack, {
+          ok: false,
+          error: "Invalid diagram presence payload.",
+          code: "INVALID_PAYLOAD",
+        });
+        return;
+      }
+
+      const { workspaceId, diagramId } = parsedPayload.data;
+
+      try {
+        await requireWorkspaceMember(workspaceId, socket.data.userId);
+        await requireDiagramInWorkspace(workspaceId, diagramId);
+
+        socket.leave(toDiagramRoom(workspaceId, diagramId));
+        removeSocketFromDiagramRoom(io, {
+          workspaceId,
+          diagramId,
+          socketId: socket.id,
+          userId: socket.data.userId,
+        });
+
+        respond(ack, { ok: true });
+      } catch (error) {
+        if (isRealtimeAuthzError(error)) {
+          respond(ack, { ok: false, error: error.message, code: error.code });
+          return;
+        }
+
+        respond(ack, {
+          ok: false,
+          error: "Failed to leave diagram presence.",
+          code: "INTERNAL",
+        });
+      }
+    });
+
+    socket.on("diagram:cursor", async (payload, ack) => {
+      const parsedPayload = diagramCursorPayloadSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        respond(ack, {
+          ok: false,
+          error: "Invalid diagram cursor payload.",
+          code: "INVALID_PAYLOAD",
+        });
+        return;
+      }
+
+      const { workspaceId, diagramId, x, y } = parsedPayload.data;
+      const roomId = toDiagramRoom(workspaceId, diagramId);
+
+      if (!socket.rooms.has(roomId)) {
+        respond(ack, {
+          ok: false,
+          error: "Join diagram presence before sending cursor updates.",
+          code: "DIAGRAM_ROOM_NOT_JOINED",
+        });
+        return;
+      }
+
+      try {
+        await requireWorkspaceMember(workspaceId, socket.data.userId);
+        await requireDiagramInWorkspace(workspaceId, diagramId);
+
+        const updatedAt = Date.now();
+        const color = getUserPresenceColor(socket.data.userId);
+
+        diagramPresenceManager.upsertPresence(
+          {
+            roomId,
+            workspaceId,
+            diagramId,
+          },
+          {
+            socketId: socket.id,
+            userId: socket.data.userId,
+            name: socket.data.name,
+            color,
+            now: updatedAt,
+          }
+        );
+
+        socket.to(roomId).emit("diagram:cursor", {
+          userId: socket.data.userId,
+          name: socket.data.name,
+          color,
+          x,
+          y,
+          updatedAt,
+        });
+
+        respond(ack, { ok: true });
+      } catch (error) {
+        if (isRealtimeAuthzError(error)) {
+          respond(ack, { ok: false, error: error.message, code: error.code });
+          return;
+        }
+
+        respond(ack, { ok: false, error: "Failed to publish cursor.", code: "INTERNAL" });
+      }
+    });
+
+    socket.on("diagram:selection", async (payload, ack) => {
+      const parsedPayload = diagramSelectionPayloadSchema.safeParse(payload);
+
+      if (!parsedPayload.success) {
+        respond(ack, {
+          ok: false,
+          error: "Invalid diagram selection payload.",
+          code: "INVALID_PAYLOAD",
+        });
+        return;
+      }
+
+      const { workspaceId, diagramId } = parsedPayload.data;
+      const roomId = toDiagramRoom(workspaceId, diagramId);
+
+      if (!socket.rooms.has(roomId)) {
+        respond(ack, {
+          ok: false,
+          error: "Join diagram presence before sending selection updates.",
+          code: "DIAGRAM_ROOM_NOT_JOINED",
+        });
+        return;
+      }
+
+      try {
+        await requireWorkspaceMember(workspaceId, socket.data.userId);
+        await requireDiagramInWorkspace(workspaceId, diagramId);
+
+        const updatedAt = Date.now();
+        const color = getUserPresenceColor(socket.data.userId);
+        const selectedNodeIds = diagramPresenceManager.setSelection(
+          {
+            roomId,
+            workspaceId,
+            diagramId,
+          },
+          {
+            socketId: socket.id,
+            userId: socket.data.userId,
+            name: socket.data.name,
+            color,
+            selectedNodeIds: parsedPayload.data.selectedNodeIds,
+            now: updatedAt,
+          }
+        );
+
+        socket.to(roomId).emit("diagram:selection", {
+          userId: socket.data.userId,
+          name: socket.data.name,
+          color,
+          selectedNodeIds,
+          updatedAt,
+        });
+
+        respond(ack, { ok: true });
+      } catch (error) {
+        if (isRealtimeAuthzError(error)) {
+          respond(ack, { ok: false, error: error.message, code: error.code });
+          return;
+        }
+
+        respond(ack, {
+          ok: false,
+          error: "Failed to publish selection.",
+          code: "INTERNAL",
+        });
       }
     });
 
@@ -424,6 +733,24 @@ export const registerRealtimeHandlers = (io: RealtimeServer) => {
 
       if (previousPresence) {
         emitPresenceUpdateForWorkspace(io, previousPresence.workspaceId);
+      }
+
+      const removedDiagramRooms = diagramPresenceManager.removeSocket(
+        socket.id,
+        socket.data.userId
+      );
+
+      for (const removedRoom of removedDiagramRooms) {
+        if (removedRoom.userLeft) {
+          io.to(removedRoom.roomId).emit("diagram:userLeft", {
+            userId: removedRoom.userId,
+          });
+        }
+
+        emitDiagramPresenceSnapshot(io, {
+          workspaceId: removedRoom.workspaceId,
+          diagramId: removedRoom.diagramId,
+        });
       }
     });
   });

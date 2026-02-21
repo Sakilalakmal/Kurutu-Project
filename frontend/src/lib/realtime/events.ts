@@ -23,6 +23,13 @@ export type PresencePayload = {
   viewingDiagramUsers: PresenceUser[];
 };
 
+export type DiagramPresenceUser = {
+  userId: string;
+  name: string;
+  color: string;
+  lastSeenAt: number;
+};
+
 export const authInitPayloadSchema = z.object({
   workspaceId: z.string().trim().min(1),
   diagramId: z.string().trim().min(1).optional(),
@@ -45,10 +52,38 @@ export const presenceUpdatePayloadSchema = z.object({
   state: z.enum(["online", "viewing"]),
 });
 
+export const diagramPresencePayloadSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  diagramId: z.string().trim().min(1),
+});
+
+export const diagramCursorPayloadSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  diagramId: z.string().trim().min(1),
+  x: z.number().finite(),
+  y: z.number().finite(),
+  viewport: z
+    .object({
+      x: z.number().finite(),
+      y: z.number().finite(),
+      zoom: z.number().finite(),
+    })
+    .optional(),
+});
+
+export const diagramSelectionPayloadSchema = z.object({
+  workspaceId: z.string().trim().min(1),
+  diagramId: z.string().trim().min(1),
+  selectedNodeIds: z.array(z.string().trim().min(1)).max(500),
+});
+
 export type AuthInitPayload = z.infer<typeof authInitPayloadSchema>;
 export type ChatSendPayload = z.infer<typeof chatSendPayloadSchema>;
 export type ThreadTypingPayload = z.infer<typeof threadTypingPayloadSchema>;
 export type PresenceUpdatePayload = z.infer<typeof presenceUpdatePayloadSchema>;
+export type DiagramPresencePayload = z.infer<typeof diagramPresencePayloadSchema>;
+export type DiagramCursorPayload = z.infer<typeof diagramCursorPayloadSchema>;
+export type DiagramSelectionPayload = z.infer<typeof diagramSelectionPayloadSchema>;
 
 export type ServerToClientEvents = {
   "chat:newMessage": (payload: {
@@ -68,6 +103,26 @@ export type ServerToClientEvents = {
   }) => void;
   "presence:snapshot": (payload: PresencePayload) => void;
   "presence:update": (payload: PresencePayload) => void;
+  "diagram:cursor": (payload: {
+    userId: string;
+    name: string;
+    color: string;
+    x: number;
+    y: number;
+    updatedAt: number;
+  }) => void;
+  "diagram:selection": (payload: {
+    userId: string;
+    name: string;
+    color: string;
+    selectedNodeIds: string[];
+    updatedAt: number;
+  }) => void;
+  "diagram:presenceSnapshot": (payload: {
+    diagramId: string;
+    users: DiagramPresenceUser[];
+  }) => void;
+  "diagram:userLeft": (payload: { userId: string }) => void;
 };
 
 export type ClientToServerEvents = {
@@ -83,6 +138,22 @@ export type ClientToServerEvents = {
   ) => void;
   "presence:update": (
     payload: PresenceUpdatePayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  "diagram:presenceJoin": (
+    payload: DiagramPresencePayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  "diagram:presenceLeave": (
+    payload: DiagramPresencePayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  "diagram:cursor": (
+    payload: DiagramCursorPayload,
+    ack?: (response: RealtimeAck) => void
+  ) => void;
+  "diagram:selection": (
+    payload: DiagramSelectionPayload,
     ack?: (response: RealtimeAck) => void
   ) => void;
 };

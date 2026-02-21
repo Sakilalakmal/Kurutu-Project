@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { PageSwitcher } from "@/components/editor/PageSwitcher";
-import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/tooltip";
 import { EDGE_STYLE_LABELS, EDGE_STYLE_OPTIONS, toStoredEdgeStyle } from "@/lib/diagram/edges";
 import type { DiagramEdgeType } from "@/lib/diagram/types";
+import type { DiagramPresenceUser } from "@/lib/realtime/events";
 import { cn } from "@/lib/utils";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -77,6 +78,24 @@ type EditorTopbarProps = {
   onToggleShare: (isPublic: boolean) => void;
   onCopyShareUrl: () => void;
   isCopyShareSuccess: boolean;
+  diagramPresenceUsers: DiagramPresenceUser[];
+};
+
+const getInitials = (value: string) => {
+  const parts = value
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0);
+
+  if (parts.length === 0) {
+    return "U";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 };
 
 export function EditorTopbar({
@@ -108,11 +127,14 @@ export function EditorTopbar({
   onToggleShare,
   onCopyShareUrl,
   isCopyShareSuccess,
+  diagramPresenceUsers,
 }: EditorTopbarProps) {
   const disableExport = !activePageId || isPageDisabled;
   const disableEdgeControls = !activePageId || isPageDisabled;
   const { theme, setTheme } = useTheme();
   const isDarkTheme = theme === "dark";
+  const visiblePresenceUsers = diagramPresenceUsers.slice(0, 5);
+  const overflowPresenceUsers = Math.max(diagramPresenceUsers.length - visiblePresenceUsers.length, 0);
 
   return (
     <TooltipProvider>
@@ -360,17 +382,32 @@ export function EditorTopbar({
             </PopoverContent>
           </Popover>
 
-          <AvatarGroup className="hidden 2xl:flex">
-            <Avatar size="sm">
-              <AvatarFallback>AZ</AvatarFallback>
-            </Avatar>
-            <Avatar size="sm">
-              <AvatarFallback>WL</AvatarFallback>
-            </Avatar>
-            <Avatar size="sm">
-              <AvatarFallback>MI</AvatarFallback>
-            </Avatar>
-          </AvatarGroup>
+          {visiblePresenceUsers.length > 0 ? (
+            <AvatarGroup className="hidden xl:flex">
+              {visiblePresenceUsers.map((user) => (
+                <Avatar
+                  key={user.userId}
+                  size="sm"
+                  title={user.name}
+                  className="border border-white/85"
+                >
+                  <AvatarFallback
+                    style={{
+                      backgroundColor: user.color,
+                      color: "#ffffff",
+                    }}
+                  >
+                    {getInitials(user.name)}
+                  </AvatarFallback>
+                </Avatar>
+              ))}
+              {overflowPresenceUsers > 0 ? (
+                <AvatarGroupCount className="text-xs font-semibold">
+                  +{overflowPresenceUsers}
+                </AvatarGroupCount>
+              ) : null}
+            </AvatarGroup>
+          ) : null}
 
           <Button
             size="sm"
