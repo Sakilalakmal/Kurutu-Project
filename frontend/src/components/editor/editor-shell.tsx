@@ -81,6 +81,7 @@ import {
   type EditorNodeData,
 } from "@/lib/diagram/mapper";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
+import { getRealtimeSocket } from "@/lib/realtime/socket";
 import { snapPosition } from "@/lib/diagram/snap";
 import {
   buildSnapTargets,
@@ -321,6 +322,52 @@ export function EditorShell({
 
     window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
   }, [currentWorkspaceId]);
+
+  useEffect(() => {
+    if (!initialUserId || !currentWorkspaceId) {
+      return;
+    }
+
+    const socket = getRealtimeSocket();
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [currentWorkspaceId, initialUserId]);
+
+  useEffect(() => {
+    if (!initialUserId || !currentWorkspaceId) {
+      return;
+    }
+
+    const socket = getRealtimeSocket();
+
+    const emitPresenceState = () => {
+      socket.emit("auth:init", {
+        workspaceId: currentWorkspaceId,
+        diagramId: diagramId ?? undefined,
+      });
+      socket.emit("presence:update", {
+        workspaceId: currentWorkspaceId,
+        diagramId: diagramId ?? undefined,
+        state: diagramId ? "viewing" : "online",
+      });
+    };
+
+    if (socket.connected) {
+      emitPresenceState();
+    }
+
+    socket.on("connect", emitPresenceState);
+
+    return () => {
+      socket.off("connect", emitPresenceState);
+    };
+  }, [currentWorkspaceId, diagramId, initialUserId]);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);

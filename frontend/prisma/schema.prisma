@@ -180,6 +180,7 @@ model ChatMessage {
   threadId     String
   workspaceId  String
   senderUserId String
+  clientMessageId String?
   content      String
   createdAt    DateTime   @default(now())
   editedAt     DateTime?
@@ -191,4 +192,5 @@ model ChatMessage {
   @@index([threadId, createdAt])
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([senderUserId, createdAt(sort: Desc)])
+  @@unique([senderUserId, clientMessageId])
 }

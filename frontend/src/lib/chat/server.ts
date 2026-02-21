@@ -1,10 +1,10 @@
 import { Prisma } from "../../../generated/prisma/client";
-import { prisma } from "@/app/lib/prisma";
+import { prisma } from "../../app/lib/prisma";
 import {
   type ChatMessageDto,
   type ChatThreadDto,
-} from "@/lib/chat/schemas";
-import { requireUser, requireWorkspaceMember } from "@/lib/workspace/authz";
+} from "./schemas";
+import { requireUser, requireWorkspaceMember } from "../workspace/authz";
 
 class ChatServiceError extends Error {
   status: number;
@@ -63,6 +63,7 @@ const toMessageDto = (message: MessageWithSender): ChatMessageDto => ({
   threadId: message.threadId,
   workspaceId: message.workspaceId,
   senderUserId: message.senderUserId,
+  clientMessageId: message.clientMessageId,
   content: message.content,
   createdAt: message.createdAt.toISOString(),
   editedAt: message.editedAt?.toISOString() ?? null,
@@ -286,7 +287,8 @@ export const listMessagesPage = async (
 export const createMessage = async (
   threadId: string,
   content: string,
-  userId?: string
+  userId?: string,
+  clientMessageId?: string
 ) => {
   const resolvedUserId = userId ?? (await requireUser()).userId;
   const { member, thread } = await resolveThreadForMember(threadId, resolvedUserId);
@@ -301,30 +303,74 @@ export const createMessage = async (
     throw new ChatServiceError(400, "Message content is required.");
   }
 
-  const message = await prisma.$transaction(async (tx) => {
-    const created = await tx.chatMessage.create({
-      data: {
-        threadId: thread.id,
-        workspaceId: thread.workspaceId,
+  if (normalizedContent.length > 1000) {
+    throw new ChatServiceError(400, "Message content exceeds 1000 characters.");
+  }
+
+  const normalizedClientMessageId = clientMessageId?.trim() || null;
+
+  const createMessageRecord = async () => {
+    return prisma.$transaction(async (tx) => {
+      const created = await tx.chatMessage.create({
+        data: {
+          threadId: thread.id,
+          workspaceId: thread.workspaceId,
+          senderUserId: resolvedUserId,
+          clientMessageId: normalizedClientMessageId,
+          content: normalizedContent,
+        },
+        include: messageWithSenderInclude,
+      });
+
+      await tx.chatThread.update({
+        where: {
+          id: thread.id,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      });
+
+      return created;
+    });
+  };
+
+  try {
+    const message = await createMessageRecord();
+
+    return {
+      message: toMessageDto(message),
+      wasDuplicate: false,
+    };
+  } catch (error) {
+    if (!normalizedClientMessageId || !isUniqueConstraintError(error)) {
+      throw error;
+    }
+
+    const existingMessage = await prisma.chatMessage.findFirst({
+      where: {
         senderUserId: resolvedUserId,
-        content: normalizedContent,
+        clientMessageId: normalizedClientMessageId,
       },
       include: messageWithSenderInclude,
     });
 
-    await tx.chatThread.update({
-      where: {
-        id: thread.id,
-      },
-      data: {
-        updatedAt: new Date(),
-      },
-    });
+    if (!existingMessage) {
+      throw error;
+    }
 
-    return created;
-  });
+    if (existingMessage.threadId !== thread.id) {
+      throw new ChatServiceError(
+        409,
+        "clientMessageId already exists for a different thread."
+      );
+    }
 
-  return toMessageDto(message);
+    return {
+      message: toMessageDto(existingMessage),
+      wasDuplicate: true,
+    };
+  }
 };
 
 export const isChatServiceError = (value: unknown): value is ChatServiceError =>

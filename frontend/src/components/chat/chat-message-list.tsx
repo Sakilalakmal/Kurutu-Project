@@ -1,19 +1,28 @@
 "use client";
 
 import type { RefObject } from "react";
+import { AlertTriangle, Check } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import type { ChatMessage } from "@/lib/chat/api";
 import { cn } from "@/lib/utils";
 
+export type ChatDeliveryStatus = "pending" | "sent" | "failed";
+
+export type ChatMessageListItem = ChatMessage & {
+  deliveryStatus: ChatDeliveryStatus;
+};
+
 type ChatMessageListProps = {
   containerRef: RefObject<HTMLDivElement | null>;
-  messages: ChatMessage[];
+  messages: ChatMessageListItem[];
   currentUserId: string | null;
   isLoading: boolean;
   isLoadingMore: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
+  onRetryMessage: (clientMessageId: string) => void;
 };
 
 const formatTimestamp = (value: string) =>
@@ -36,6 +45,18 @@ const toInitials = (name: string) => {
   return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
 };
 
+const DeliveryStatusIcon = ({ status }: { status: ChatDeliveryStatus }) => {
+  if (status === "pending") {
+    return <Spinner className="size-3 text-zinc-400" />;
+  }
+
+  if (status === "failed") {
+    return <AlertTriangle className="size-3 text-red-500" />;
+  }
+
+  return <Check className="size-3 text-blue-500" />;
+};
+
 export function ChatMessageList({
   containerRef,
   messages,
@@ -44,6 +65,7 @@ export function ChatMessageList({
   isLoadingMore,
   hasMore,
   onLoadMore,
+  onRetryMessage,
 }: ChatMessageListProps) {
   return (
     <div
@@ -79,6 +101,10 @@ export function ChatMessageList({
       {!isLoading
         ? messages.map((message) => {
             const isOwn = currentUserId !== null && message.senderUserId === currentUserId;
+            const canRetry =
+              isOwn &&
+              message.deliveryStatus === "failed" &&
+              Boolean(message.clientMessageId);
 
             return (
               <article
@@ -95,9 +121,28 @@ export function ChatMessageList({
                     <AvatarFallback>{toInitials(message.sender.name)}</AvatarFallback>
                   </Avatar>
                   <span className="truncate font-medium opacity-90">{message.sender.name}</span>
-                  <span className="ml-auto opacity-70">{formatTimestamp(message.createdAt)}</span>
+                  <span className="ml-auto flex items-center gap-1 opacity-70">
+                    {formatTimestamp(message.createdAt)}
+                    {isOwn ? <DeliveryStatusIcon status={message.deliveryStatus} /> : null}
+                  </span>
                 </div>
                 <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                {canRetry ? (
+                  <div className="mt-2 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 rounded-full px-2 text-[11px] text-red-500 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-950/50"
+                      onClick={() => {
+                        if (message.clientMessageId) {
+                          onRetryMessage(message.clientMessageId);
+                        }
+                      }}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : null}
               </article>
             );
           })
