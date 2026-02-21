@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { toast } from "sonner";
@@ -10,14 +18,19 @@ import {
   ChatMessageList,
 } from "@/components/chat/chat-message-list";
 import { Card } from "@/components/ui/card";
-import {
-  type ChatMessage,
-  type ChatThread,
-  ensureDiagramChatThread,
-  getChatMessages,
-  getChatThreads,
+import type {
+  ChatMessage,
+  ChatThread,
+  ChatThreadsResponse,
 } from "@/lib/chat/api";
 import type { PresencePayload, PresenceUser } from "@/lib/realtime/events";
+import { keys } from "@/lib/query/keys";
+import {
+  ensureDiagramThread,
+  fetchChatMessagesPage,
+  fetchChatThreads,
+  postChatMessage,
+} from "@/lib/query/chat";
 import { getRealtimeSocket } from "@/lib/realtime/socket";
 import { cn } from "@/lib/utils";
 import type { WorkspaceMemberRole } from "@/lib/workspace/types";
@@ -31,8 +44,20 @@ type ChatPanelProps = {
   currentUserId: string | null;
 };
 
+type ChatMessagesPage = {
+  messages: ChatMessageListItem[];
+  nextCursor: string | null;
+};
+
+type ChatMessagesInfiniteData = InfiniteData<ChatMessagesPage, string | undefined>;
+
+type SendMessageVariables = {
+  threadId: string;
+  content: string;
+  clientMessageId: string;
+};
+
 const NEAR_BOTTOM_THRESHOLD = 80;
-const SEND_TIMEOUT_MS = 8000;
 const TYPING_IDLE_MS = 1500;
 
 const createClientMessageId = () =>
@@ -74,37 +99,6 @@ const sortMessages = (messages: ChatMessageListItem[]) =>
     return left.id.localeCompare(right.id);
   });
 
-const mergeRealtimeMessage = (
-  existing: ChatMessageListItem[],
-  incomingMessage: ChatMessage
-) => {
-  const incoming = toMessageListItem(incomingMessage);
-  let hasMatch = false;
-  const next = existing.map((message) => {
-    if (message.id === incoming.id) {
-      hasMatch = true;
-      return incoming;
-    }
-
-    if (
-      incoming.clientMessageId &&
-      message.clientMessageId === incoming.clientMessageId &&
-      message.senderUserId === incoming.senderUserId
-    ) {
-      hasMatch = true;
-      return incoming;
-    }
-
-    return message;
-  });
-
-  if (!hasMatch) {
-    next.push(incoming);
-  }
-
-  return sortMessages(next);
-};
-
 const formatTypingText = (names: string[]) => {
   if (names.length === 0) {
     return "";
@@ -121,6 +115,19 @@ const formatTypingText = (names: string[]) => {
   return `${names[0]}, ${names[1]} and others are typing...`;
 };
 
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+
+const createEmptyMessagesData = (): ChatMessagesInfiniteData => ({
+  pages: [
+    {
+      messages: [],
+      nextCursor: null,
+    },
+  ],
+  pageParams: [undefined],
+});
+
 export function ChatPanel({
   className,
   isOpen,
@@ -129,39 +136,112 @@ export function ChatPanel({
   diagramTitle,
   currentUserId,
 }: ChatPanelProps) {
-  const [workspaceName, setWorkspaceName] = useState("Workspace");
-  const [currentRole, setCurrentRole] = useState<WorkspaceMemberRole | null>(null);
-  const [threads, setThreads] = useState<ChatThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessageListItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
-  const [isThreadsLoading, setIsThreadsLoading] = useState(false);
-  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [socketConnected, setSocketConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
   const [viewingDiagramUsers, setViewingDiagramUsers] = useState<PresenceUser[]>([]);
   const [typingUserIdsByThread, setTypingUserIdsByThread] = useState<Record<string, string[]>>(
     {}
   );
+  const queryClient = useQueryClient();
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const lastTypingThreadIdRef = useRef<string | null>(null);
+  const selectedThreadIdRef = useRef<string | null>(null);
+  const lastWorkspaceIdRef = useRef<string | null>(null);
+  const hasManualThreadSelectionRef = useRef(false);
+  const previousMessageCountRef = useRef(0);
+  const hasAutoScrolledForThreadRef = useRef(false);
 
-  const resetThreadState = useCallback(() => {
-    setThreads([]);
-    setSelectedThreadId(null);
-    setMessages([]);
-    setNextCursor(null);
-    setCurrentRole(null);
-    setWorkspaceName("Workspace");
-    setComposerValue("");
-    setOnlineUsers([]);
-    setViewingDiagramUsers([]);
-    setTypingUserIdsByThread({});
-  }, []);
+  const threadsQuery = useQuery({
+    queryKey: keys.chatThreads(workspaceId ?? ""),
+    queryFn: () => fetchChatThreads(workspaceId as string),
+    enabled: isOpen && Boolean(workspaceId),
+    refetchInterval: isOpen ? 10_000 : false,
+    placeholderData: keepPreviousData,
+  });
+
+  const diagramThreadQuery = useQuery({
+    queryKey: ["chat", "threads", "diagram", workspaceId ?? "", diagramId ?? ""],
+    queryFn: () => ensureDiagramThread(workspaceId as string, diagramId as string),
+    enabled: isOpen && Boolean(workspaceId) && Boolean(diagramId),
+  });
+
+  const activeThreadsData = useMemo(() => {
+    if (!workspaceId || !threadsQuery.data) {
+      return null;
+    }
+
+    return threadsQuery.data.workspace.id === workspaceId ? threadsQuery.data : null;
+  }, [threadsQuery.data, workspaceId]);
+
+  const threads = useMemo(() => {
+    let nextThreads = orderThreads(activeThreadsData?.threads ?? []);
+
+    if (diagramThreadQuery.data) {
+      nextThreads = upsertThread(nextThreads, diagramThreadQuery.data);
+    }
+
+    if (!diagramId) {
+      return nextThreads;
+    }
+
+    const normalizedTitle = diagramTitle.trim() || "Untitled Diagram";
+
+    return nextThreads.map((thread) =>
+      thread.type === "DIAGRAM" && thread.diagramId === diagramId
+        ? {
+            ...thread,
+            title: `Diagram: ${normalizedTitle}`,
+            diagram: {
+              id: diagramId,
+              title: normalizedTitle,
+            },
+          }
+        : thread
+    );
+  }, [activeThreadsData?.threads, diagramId, diagramThreadQuery.data, diagramTitle]);
+
+  const messagesQuery = useInfiniteQuery({
+    queryKey: keys.chatMessages(selectedThreadId ?? ""),
+    queryFn: async ({ pageParam }) => {
+      const response = await fetchChatMessagesPage(selectedThreadId as string, pageParam);
+
+      return {
+        messages: sortMessages([...response.messages].reverse().map(toMessageListItem)),
+        nextCursor: response.nextCursor,
+      };
+    },
+    enabled: isOpen && Boolean(selectedThreadId),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    refetchInterval: isOpen && Boolean(selectedThreadId) ? 4_000 : false,
+  });
+
+  const messages = useMemo(() => {
+    if (!messagesQuery.data) {
+      return [] as ChatMessageListItem[];
+    }
+
+    const byId = new Map<string, ChatMessageListItem>();
+
+    for (const page of [...messagesQuery.data.pages].reverse()) {
+      for (const message of page.messages) {
+        byId.set(message.id, message);
+      }
+    }
+
+    return sortMessages(Array.from(byId.values()));
+  }, [messagesQuery.data]);
+
+  const workspaceName = activeThreadsData?.workspace.name ?? "Workspace";
+  const currentRole: WorkspaceMemberRole | null = activeThreadsData?.currentRole ?? null;
+  const isThreadsLoading = threadsQuery.isLoading && !activeThreadsData;
+  const isMessagesLoading = messagesQuery.isLoading && !messagesQuery.data;
+  const hasMore = Boolean(messagesQuery.hasNextPage);
+  const isLoadingMore = messagesQuery.isFetchingNextPage;
 
   const scrollToBottom = useCallback(() => {
     const container = messagesContainerRef.current;
@@ -173,71 +253,278 @@ export function ChatPanel({
     container.scrollTop = container.scrollHeight;
   }, []);
 
-  const updateThreadTimestamp = useCallback((threadId: string, updatedAt: string) => {
-    setThreads((current) =>
-      orderThreads(
-        current.map((thread) =>
-          thread.id === threadId
-            ? {
-                ...thread,
-                updatedAt,
-              }
-            : thread
-        )
-      )
-    );
+  const stopTyping = useCallback((threadIdOverride?: string | null) => {
+    const threadId = threadIdOverride ?? selectedThreadIdRef.current;
+
+    if (!threadId || !isTypingRef.current) {
+      return;
+    }
+
+    const socket = getRealtimeSocket();
+
+    if (socket.connected) {
+      socket.emit("chat:typingStop", { threadId });
+    }
+
+    isTypingRef.current = false;
+
+    if (typingStopTimerRef.current) {
+      clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
   }, []);
 
-  const reloadMessages = useCallback(
-    async (threadId: string) => {
-      setIsMessagesLoading(true);
-      setMessages([]);
-      setNextCursor(null);
-
-      try {
-        const response = await getChatMessages({ threadId });
-        const nextMessages = [...response.messages].reverse().map(toMessageListItem);
-
-        setMessages(sortMessages(nextMessages));
-        setNextCursor(response.nextCursor);
-
-        requestAnimationFrame(() => {
-          scrollToBottom();
-        });
-      } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Failed to load chat messages."
-        );
-      } finally {
-        setIsMessagesLoading(false);
-      }
-    },
-    [scrollToBottom]
-  );
-
-  const stopTyping = useCallback(
-    (threadIdOverride?: string | null) => {
-      const threadId = threadIdOverride ?? selectedThreadId;
-
-      if (!threadId || !isTypingRef.current) {
+  const updateThreadTimestamp = useCallback(
+    (threadId: string, updatedAt: string) => {
+      if (!workspaceId) {
         return;
       }
 
-      const socket = getRealtimeSocket();
+      queryClient.setQueryData<ChatThreadsResponse>(
+        keys.chatThreads(workspaceId),
+        (current) => {
+          if (!current) {
+            return current;
+          }
 
-      if (socket.connected) {
-        socket.emit("chat:typingStop", { threadId });
-      }
-
-      isTypingRef.current = false;
-
-      if (typingStopTimerRef.current) {
-        clearTimeout(typingStopTimerRef.current);
-        typingStopTimerRef.current = null;
-      }
+          return {
+            ...current,
+            threads: orderThreads(
+              current.threads.map((thread) =>
+                thread.id === threadId
+                  ? {
+                      ...thread,
+                      updatedAt,
+                    }
+                  : thread
+              )
+            ),
+          };
+        }
+      );
     },
-    [selectedThreadId]
+    [queryClient, workspaceId]
   );
+
+  const sendMessageMutation = useMutation<ChatMessage, unknown, SendMessageVariables>({
+    mutationFn: ({ threadId, content, clientMessageId }) =>
+      postChatMessage({ threadId, content, clientMessageId }),
+    onMutate: async ({ threadId, content, clientMessageId }) => {
+      if (!currentUserId) {
+        return;
+      }
+
+      const queryKey = keys.chatMessages(threadId);
+
+      await queryClient.cancelQueries({ queryKey });
+
+      const nowIso = new Date().toISOString();
+      const currentUser =
+        onlineUsers.find((user) => user.id === currentUserId) ??
+        messages.find((message) => message.senderUserId === currentUserId)?.sender ?? {
+          id: currentUserId,
+          name: "You",
+          image: null,
+        };
+
+      queryClient.setQueryData<ChatMessagesInfiniteData>(queryKey, (current) => {
+        const base = current ?? createEmptyMessagesData();
+        const nextPages =
+          base.pages.length > 0
+            ? [...base.pages]
+            : createEmptyMessagesData().pages;
+        let hasMatch = false;
+
+        const normalizedPages = nextPages.map((page) => ({
+          ...page,
+          messages: sortMessages(
+            page.messages.map((message) => {
+              if (
+                message.senderUserId === currentUserId &&
+                message.clientMessageId === clientMessageId
+              ) {
+                hasMatch = true;
+
+                return {
+                  ...message,
+                  content,
+                  deliveryStatus: "pending" as const,
+                };
+              }
+
+              return message;
+            })
+          ),
+        }));
+
+        if (!hasMatch) {
+          normalizedPages[0] = {
+            ...normalizedPages[0],
+            messages: sortMessages([
+              ...normalizedPages[0].messages,
+              {
+                id: `local:${clientMessageId}`,
+                threadId,
+                workspaceId: workspaceId ?? "",
+                senderUserId: currentUserId,
+                clientMessageId,
+                content,
+                createdAt: nowIso,
+                editedAt: null,
+                deletedAt: null,
+                sender: {
+                  id: currentUser.id,
+                  name: currentUser.name,
+                  image: currentUser.image,
+                },
+                deliveryStatus: "pending",
+              },
+            ]),
+          };
+        }
+
+        return {
+          ...base,
+          pages: normalizedPages,
+          pageParams:
+            base.pageParams.length > 0
+              ? base.pageParams
+              : createEmptyMessagesData().pageParams,
+        };
+      });
+
+      updateThreadTimestamp(threadId, nowIso);
+    },
+    onSuccess: (message, variables) => {
+      const queryKey = keys.chatMessages(variables.threadId);
+      const sentMessage = toMessageListItem(message);
+      let didReplace = false;
+
+      queryClient.setQueryData<ChatMessagesInfiniteData>(queryKey, (current) => {
+        const base = current ?? createEmptyMessagesData();
+        const nextPages = base.pages.map((page) => ({
+          ...page,
+          messages: sortMessages(
+            page.messages.map((entry) => {
+              if (
+                entry.id === sentMessage.id ||
+                (sentMessage.clientMessageId &&
+                  entry.clientMessageId === sentMessage.clientMessageId &&
+                  entry.senderUserId === sentMessage.senderUserId)
+              ) {
+                didReplace = true;
+                return sentMessage;
+              }
+
+              return entry;
+            })
+          ),
+        }));
+
+        if (!didReplace) {
+          nextPages[0] = {
+            ...nextPages[0],
+            messages: sortMessages([...nextPages[0].messages, sentMessage]),
+          };
+        }
+
+        return {
+          ...base,
+          pages: nextPages,
+        };
+      });
+
+      updateThreadTimestamp(message.threadId, message.createdAt);
+    },
+    onError: (error, variables) => {
+      if (!currentUserId) {
+        return;
+      }
+
+      queryClient.setQueryData<ChatMessagesInfiniteData>(
+        keys.chatMessages(variables.threadId),
+        (current) => {
+          if (!current) {
+            return current;
+          }
+
+          return {
+            ...current,
+            pages: current.pages.map((page) => ({
+              ...page,
+              messages: page.messages.map((message) =>
+                message.senderUserId === currentUserId &&
+                message.clientMessageId === variables.clientMessageId &&
+                message.deliveryStatus !== "sent"
+                  ? {
+                      ...message,
+                      deliveryStatus: "failed",
+                    }
+                  : message
+              ),
+            })),
+          };
+        }
+      );
+
+      toast.error(getErrorMessage(error, "Failed to send message."));
+    },
+  });
+
+  useEffect(() => {
+    selectedThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      hasManualThreadSelectionRef.current = false;
+      lastWorkspaceIdRef.current = null;
+      return;
+    }
+
+    const isWorkspaceChanged = lastWorkspaceIdRef.current !== workspaceId;
+
+    if (isWorkspaceChanged) {
+      hasManualThreadSelectionRef.current = false;
+    }
+
+    setSelectedThreadId((current) => {
+      const hasCurrentSelection =
+        Boolean(current) && threads.some((thread) => thread.id === current);
+
+      if (
+        !isWorkspaceChanged &&
+        hasManualThreadSelectionRef.current &&
+        hasCurrentSelection
+      ) {
+        return current;
+      }
+
+      if (hasCurrentSelection) {
+        return current;
+      }
+
+      if (diagramId) {
+        const diagramThread = threads.find(
+          (thread) => thread.type === "DIAGRAM" && thread.diagramId === diagramId
+        );
+
+        if (diagramThread) {
+          return diagramThread.id;
+        }
+      }
+
+      const generalThreadId = getGeneralThreadId(threads);
+
+      if (generalThreadId) {
+        return generalThreadId;
+      }
+
+      return threads[0]?.id ?? null;
+    });
+
+    lastWorkspaceIdRef.current = workspaceId;
+  }, [diagramId, threads, workspaceId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -246,84 +533,50 @@ export function ChatPanel({
       return;
     }
 
-    if (!workspaceId) {
-      resetThreadState();
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadThreads = async () => {
-      setIsThreadsLoading(true);
-      setCurrentRole(null);
-
-      try {
-        const result = await getChatThreads(workspaceId);
-
-        if (cancelled) {
-          return;
-        }
-
-        setWorkspaceName(result.workspace.name);
-        setCurrentRole(result.currentRole);
-
-        let nextThreads = orderThreads(result.threads);
-        let defaultThreadId = getGeneralThreadId(nextThreads);
-
-        if (diagramId) {
-          const ensuredThread = await ensureDiagramChatThread({ workspaceId, diagramId });
-
-          if (cancelled) {
-            return;
-          }
-
-          nextThreads = upsertThread(nextThreads, {
-            ...ensuredThread,
-            title:
-              ensuredThread.type === "DIAGRAM"
-                ? `Diagram: ${diagramTitle.trim() || "Untitled Diagram"}`
-                : ensuredThread.title,
-            diagram:
-              ensuredThread.type === "DIAGRAM"
-                ? {
-                    id: diagramId,
-                    title: diagramTitle.trim() || "Untitled Diagram",
-                  }
-                : ensuredThread.diagram,
-          });
-          defaultThreadId = ensuredThread.id;
-        }
-
-        setThreads(nextThreads);
-        setSelectedThreadId(defaultThreadId);
-      } catch (error) {
-        if (!cancelled) {
-          toast.error(
-            error instanceof Error ? error.message : "Failed to load chat threads."
-          );
-          resetThreadState();
-        }
-      } finally {
-        if (!cancelled) {
-          setIsThreadsLoading(false);
-        }
-      }
-    };
-
-    void loadThreads();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [diagramId, diagramTitle, isOpen, resetThreadState, stopTyping, workspaceId]);
+    hasAutoScrolledForThreadRef.current = false;
+  }, [isOpen, stopTyping]);
 
   useEffect(() => {
-    if (!isOpen || !workspaceId || !selectedThreadId) {
+    if (!selectedThreadId) {
+      stopTyping(lastTypingThreadIdRef.current);
+      lastTypingThreadIdRef.current = null;
       return;
     }
 
-    void reloadMessages(selectedThreadId);
-  }, [isOpen, reloadMessages, selectedThreadId, workspaceId]);
+    if (lastTypingThreadIdRef.current && lastTypingThreadIdRef.current !== selectedThreadId) {
+      stopTyping(lastTypingThreadIdRef.current);
+    }
+
+    lastTypingThreadIdRef.current = selectedThreadId;
+    hasAutoScrolledForThreadRef.current = false;
+    previousMessageCountRef.current = 0;
+  }, [selectedThreadId, stopTyping]);
+
+  useEffect(() => {
+    if (!threadsQuery.error) {
+      return;
+    }
+
+    toast.error(getErrorMessage(threadsQuery.error, "Failed to load chat threads."));
+  }, [threadsQuery.error]);
+
+  useEffect(() => {
+    if (!diagramThreadQuery.error) {
+      return;
+    }
+
+    toast.error(
+      getErrorMessage(diagramThreadQuery.error, "Failed to ensure diagram chat thread.")
+    );
+  }, [diagramThreadQuery.error]);
+
+  useEffect(() => {
+    if (!messagesQuery.error) {
+      return;
+    }
+
+    toast.error(getErrorMessage(messagesQuery.error, "Failed to load chat messages."));
+  }, [messagesQuery.error]);
 
   useEffect(() => {
     if (!isOpen || !workspaceId) {
@@ -367,59 +620,6 @@ export function ChatPanel({
       setViewingDiagramUsers(payload.viewingDiagramUsers);
     };
 
-    const handleNewMessage = ({
-      message,
-    }: {
-      message: ChatMessage;
-      clientMessageId?: string;
-      senderUserId: string;
-    }) => {
-      const container = messagesContainerRef.current;
-      const shouldStickToBottom =
-        !container ||
-        container.scrollHeight - container.scrollTop - container.clientHeight <
-          NEAR_BOTTOM_THRESHOLD;
-
-      setMessages((current) => mergeRealtimeMessage(current, message));
-      updateThreadTimestamp(message.threadId, message.createdAt);
-
-      if (shouldStickToBottom) {
-        requestAnimationFrame(() => {
-          scrollToBottom();
-        });
-      }
-    };
-
-    const handleSentAck = ({
-      clientMessageId,
-      messageId,
-      createdAt,
-    }: {
-      clientMessageId: string;
-      messageId: string;
-      createdAt: string;
-    }) => {
-      if (!currentUserId) {
-        return;
-      }
-
-      setMessages((current) =>
-        sortMessages(
-          current.map((message) =>
-            message.senderUserId === currentUserId &&
-            message.clientMessageId === clientMessageId
-              ? {
-                  ...message,
-                  id: messageId,
-                  createdAt,
-                  deliveryStatus: "sent",
-                }
-              : message
-          )
-        )
-      );
-    };
-
     const handleTyping = ({
       threadId,
       userId,
@@ -460,12 +660,9 @@ export function ChatPanel({
     socket.on("disconnect", handleDisconnect);
     socket.on("presence:snapshot", handlePresenceSnapshot);
     socket.on("presence:update", handlePresenceUpdate);
-    socket.on("chat:newMessage", handleNewMessage);
-    socket.on("chat:sentAck", handleSentAck);
     socket.on("chat:typing", handleTyping);
 
     if (socket.connected) {
-      setSocketConnected(true);
       handleConnect();
     }
 
@@ -474,33 +671,50 @@ export function ChatPanel({
       socket.off("disconnect", handleDisconnect);
       socket.off("presence:snapshot", handlePresenceSnapshot);
       socket.off("presence:update", handlePresenceUpdate);
-      socket.off("chat:newMessage", handleNewMessage);
-      socket.off("chat:sentAck", handleSentAck);
       socket.off("chat:typing", handleTyping);
     };
-  }, [
-    currentUserId,
-    diagramId,
-    isOpen,
-    scrollToBottom,
-    selectedThreadId,
-    updateThreadTimestamp,
-    workspaceId,
-  ]);
+  }, [diagramId, isOpen, selectedThreadId, workspaceId]);
 
   useEffect(() => {
-    if (!selectedThreadId) {
-      stopTyping(lastTypingThreadIdRef.current);
-      lastTypingThreadIdRef.current = null;
+    if (!isOpen || !selectedThreadId || hasAutoScrolledForThreadRef.current) {
       return;
     }
 
-    if (lastTypingThreadIdRef.current && lastTypingThreadIdRef.current !== selectedThreadId) {
-      stopTyping(lastTypingThreadIdRef.current);
+    if (!messagesQuery.isFetched) {
+      return;
     }
 
-    lastTypingThreadIdRef.current = selectedThreadId;
-  }, [selectedThreadId, stopTyping]);
+    requestAnimationFrame(() => {
+      scrollToBottom();
+      hasAutoScrolledForThreadRef.current = true;
+      previousMessageCountRef.current = messages.length;
+    });
+  }, [isOpen, messages.length, messagesQuery.isFetched, scrollToBottom, selectedThreadId]);
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    const previousCount = previousMessageCountRef.current;
+    const nextCount = messages.length;
+
+    if (!container) {
+      previousMessageCountRef.current = nextCount;
+      return;
+    }
+
+    if (nextCount > previousCount) {
+      const shouldStickToBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+        NEAR_BOTTOM_THRESHOLD;
+
+      if (shouldStickToBottom) {
+        requestAnimationFrame(() => {
+          scrollToBottom();
+        });
+      }
+    }
+
+    previousMessageCountRef.current = nextCount;
+  }, [messages, scrollToBottom]);
 
   useEffect(() => {
     return () => {
@@ -509,7 +723,7 @@ export function ChatPanel({
   }, [stopTyping]);
 
   const handleLoadMore = useCallback(async () => {
-    if (!selectedThreadId || !nextCursor || isLoadingMore) {
+    if (!selectedThreadId || !hasMore || isLoadingMore) {
       return;
     }
 
@@ -517,22 +731,8 @@ export function ChatPanel({
     const previousScrollHeight = container?.scrollHeight ?? 0;
     const previousScrollTop = container?.scrollTop ?? 0;
 
-    setIsLoadingMore(true);
-
     try {
-      const response = await getChatMessages({
-        threadId: selectedThreadId,
-        cursor: nextCursor,
-      });
-      const older = [...response.messages].reverse().map(toMessageListItem);
-
-      setMessages((current) => {
-        const existingIds = new Set(current.map((message) => message.id));
-        const toPrepend = older.filter((message) => !existingIds.has(message.id));
-
-        return [...toPrepend, ...current];
-      });
-      setNextCursor(response.nextCursor);
+      await messagesQuery.fetchNextPage();
 
       requestAnimationFrame(() => {
         if (!container) {
@@ -543,93 +743,9 @@ export function ChatPanel({
         container.scrollTop = nextScrollHeight - previousScrollHeight + previousScrollTop;
       });
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to load older messages."
-      );
-    } finally {
-      setIsLoadingMore(false);
+      toast.error(getErrorMessage(error, "Failed to load older messages."));
     }
-  }, [isLoadingMore, nextCursor, selectedThreadId]);
-
-  const markMessageAsFailed = useCallback(
-    (clientMessageId: string) => {
-      if (!currentUserId) {
-        return;
-      }
-
-      setMessages((current) =>
-        current.map((message) =>
-          message.senderUserId === currentUserId &&
-          message.clientMessageId === clientMessageId &&
-          message.deliveryStatus !== "sent"
-            ? {
-                ...message,
-                deliveryStatus: "failed",
-              }
-            : message
-        )
-      );
-    },
-    [currentUserId]
-  );
-
-  const emitSendMessage = useCallback(
-    ({
-      clientMessageId,
-      content,
-      threadId,
-    }: {
-      clientMessageId: string;
-      content: string;
-      threadId: string;
-    }) => {
-      const socket = getRealtimeSocket();
-
-      if (!socket.connected) {
-        markMessageAsFailed(clientMessageId);
-        toast.error("Realtime connection is unavailable.");
-        return;
-      }
-
-      let isResolved = false;
-      const timeoutId = window.setTimeout(() => {
-        if (isResolved) {
-          return;
-        }
-
-        isResolved = true;
-        markMessageAsFailed(clientMessageId);
-      }, SEND_TIMEOUT_MS);
-
-      socket.emit(
-        "chat:send",
-        {
-          threadId,
-          content,
-          clientMessageId,
-        },
-        (response) => {
-          if (isResolved) {
-            return;
-          }
-
-          isResolved = true;
-          window.clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            markMessageAsFailed(clientMessageId);
-
-            if (response.code === "FORBIDDEN") {
-              toast.error("You don't have permission to send messages.");
-            } else {
-              toast.error(response.error);
-            }
-          }
-        }
-      );
-    },
-    [markMessageAsFailed]
-  );
+  }, [hasMore, isLoadingMore, messagesQuery, selectedThreadId]);
 
   const handleSendMessage = useCallback(() => {
     if (!selectedThreadId || !currentUserId) {
@@ -645,60 +761,17 @@ export function ChatPanel({
     stopTyping(selectedThreadId);
     setComposerValue("");
 
-    const nowIso = new Date().toISOString();
-    const clientMessageId = createClientMessageId();
-    const currentUser =
-      onlineUsers.find((user) => user.id === currentUserId) ??
-      messages.find((message) => message.senderUserId === currentUserId)?.sender ?? {
-        id: currentUserId,
-        name: "You",
-        image: null,
-      };
-
-    setMessages((current) =>
-      sortMessages([
-        ...current,
-        {
-          id: `optimistic:${clientMessageId}`,
-          threadId: selectedThreadId,
-          workspaceId: workspaceId ?? "",
-          senderUserId: currentUserId,
-          clientMessageId,
-          content: normalizedContent,
-          createdAt: nowIso,
-          editedAt: null,
-          deletedAt: null,
-          sender: {
-            id: currentUser.id,
-            name: currentUser.name,
-            image: currentUser.image,
-          },
-          deliveryStatus: "pending",
-        },
-      ])
-    );
-    updateThreadTimestamp(selectedThreadId, nowIso);
-
-    requestAnimationFrame(() => {
-      scrollToBottom();
-    });
-
-    emitSendMessage({
-      clientMessageId,
-      content: normalizedContent,
+    sendMessageMutation.mutate({
       threadId: selectedThreadId,
+      content: normalizedContent,
+      clientMessageId: createClientMessageId(),
     });
   }, [
     composerValue,
     currentUserId,
-    emitSendMessage,
-    messages,
-    onlineUsers,
-    scrollToBottom,
     selectedThreadId,
+    sendMessageMutation,
     stopTyping,
-    updateThreadTimestamp,
-    workspaceId,
   ]);
 
   const handleRetryMessage = useCallback(
@@ -711,24 +784,13 @@ export function ChatPanel({
         return;
       }
 
-      setMessages((current) =>
-        current.map((message) =>
-          message.clientMessageId === clientMessageId
-            ? {
-                ...message,
-                deliveryStatus: "pending",
-              }
-            : message
-        )
-      );
-
-      emitSendMessage({
-        clientMessageId,
-        content: failedMessage.content,
+      sendMessageMutation.mutate({
         threadId: selectedThreadId,
+        content: failedMessage.content,
+        clientMessageId,
       });
     },
-    [emitSendMessage, messages, selectedThreadId]
+    [messages, selectedThreadId, sendMessageMutation]
   );
 
   const handleTypingActivity = useCallback(() => {
@@ -752,9 +814,13 @@ export function ChatPanel({
     }, TYPING_IDLE_MS);
   }, [selectedThreadId, socketConnected, stopTyping]);
 
+  const handleThreadChange = useCallback((threadId: string) => {
+    hasManualThreadSelectionRef.current = true;
+    setSelectedThreadId(threadId);
+  }, []);
+
   const isViewer = currentRole === "VIEWER";
-  const canSend =
-    !isViewer && Boolean(selectedThreadId) && !isThreadsLoading && socketConnected;
+  const canSend = !isViewer && Boolean(selectedThreadId) && !isThreadsLoading;
   const composerDisabledReason = useMemo(() => {
     if (isViewer) {
       return "Viewers can't send messages";
@@ -768,12 +834,8 @@ export function ChatPanel({
       return "Select a thread to start chatting";
     }
 
-    if (!socketConnected) {
-      return "Connecting realtime...";
-    }
-
     return undefined;
-  }, [isThreadsLoading, isViewer, selectedThreadId, socketConnected]);
+  }, [isThreadsLoading, isViewer, selectedThreadId]);
 
   const userNameById = useMemo(() => {
     const lookup = new Map<string, string>();
@@ -833,7 +895,7 @@ export function ChatPanel({
         workspaceName={workspaceName}
         threads={threads}
         selectedThreadId={selectedThreadId}
-        onThreadChange={setSelectedThreadId}
+        onThreadChange={handleThreadChange}
         onlineUsers={onlineUsers}
         viewingDiagramUsers={viewingDiagramUsers}
         disabled={isThreadsLoading}
@@ -847,7 +909,7 @@ export function ChatPanel({
         currentUserId={currentUserId}
         isLoading={isMessagesLoading || isThreadsLoading}
         isLoadingMore={isLoadingMore}
-        hasMore={nextCursor !== null}
+        hasMore={hasMore}
         onLoadMore={() => {
           void handleLoadMore();
         }}

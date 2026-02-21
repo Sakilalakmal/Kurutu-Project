@@ -1,16 +1,18 @@
 import { createServer } from "node:http";
 import next from "next";
+import { loadEnvConfig } from "@next/env";
 import { Server as SocketIOServer } from "socket.io";
 import type {
   ClientToServerEvents,
   InterServerEvents,
   ServerToClientEvents,
 } from "./src/lib/realtime/events";
-import { registerRealtimeHandlers } from "./src/server/realtime/register";
 import type { RealtimeSocketData } from "./src/server/realtime/types";
 
 const dev = (process.env.NODE_ENV ?? "development") !== "production";
-const hostname = process.env.HOSTNAME ?? "0.0.0.0";
+loadEnvConfig(process.cwd(), dev);
+
+const hostname = process.env.HOSTNAME ?? "localhost";
 const port = Number(process.env.PORT ?? 3000);
 
 const app = next({ dev, hostname, port });
@@ -18,7 +20,9 @@ const requestHandler = app.getRequestHandler();
 
 void app
   .prepare()
-  .then(() => {
+  .then(async () => {
+    const { registerRealtimeHandlers } = await import("./src/server/realtime/register");
+
     const httpServer = createServer((request, response) => {
       void requestHandler(request, response);
     });
