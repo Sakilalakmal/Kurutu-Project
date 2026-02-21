@@ -126,16 +126,18 @@ export const getChatMessages = async ({
 export const sendChatMessage = async ({
   threadId,
   content,
+  clientMessageId,
 }: {
   threadId: string;
   content: string;
+  clientMessageId?: string;
 }) => {
   const response = await fetch("/api/chat/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ threadId, content }),
+    body: JSON.stringify({ threadId, content, clientMessageId }),
   });
 
   if (!response.ok) {

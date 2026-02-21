@@ -5,17 +5,20 @@ import { MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { ChatComposer } from "@/components/chat/chat-composer";
 import { ChatHeader } from "@/components/chat/chat-header";
-import { ChatMessageList } from "@/components/chat/chat-message-list";
+import {
+  type ChatMessageListItem,
+  ChatMessageList,
+} from "@/components/chat/chat-message-list";
 import { Card } from "@/components/ui/card";
 import {
   type ChatMessage,
   type ChatThread,
-  ChatApiError,
   ensureDiagramChatThread,
   getChatMessages,
   getChatThreads,
-  sendChatMessage,
 } from "@/lib/chat/api";
+import type { PresencePayload, PresenceUser } from "@/lib/realtime/events";
+import { getRealtimeSocket } from "@/lib/realtime/socket";
 import { cn } from "@/lib/utils";
 import type { WorkspaceMemberRole } from "@/lib/workspace/types";
 
@@ -28,8 +31,14 @@ type ChatPanelProps = {
   currentUserId: string | null;
 };
 
-const POLL_INTERVAL_MS = 5000;
 const NEAR_BOTTOM_THRESHOLD = 80;
+const SEND_TIMEOUT_MS = 8000;
+const TYPING_IDLE_MS = 1500;
+
+const createClientMessageId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const orderThreads = (threads: ChatThread[]) => {
   const general = threads.find((thread) => thread.type === "WORKSPACE_GENERAL") ?? null;
@@ -46,18 +55,16 @@ const upsertThread = (threads: ChatThread[], target: ChatThread) => {
   return orderThreads([target, ...withoutTarget]);
 };
 
-const mergeMessages = (existing: ChatMessage[], incoming: ChatMessage[]) => {
-  if (incoming.length === 0) {
-    return existing;
-  }
+const getGeneralThreadId = (threads: ChatThread[]) =>
+  threads.find((thread) => thread.type === "WORKSPACE_GENERAL")?.id ?? null;
 
-  const byId = new Map(existing.map((message) => [message.id, message]));
+const toMessageListItem = (message: ChatMessage): ChatMessageListItem => ({
+  ...message,
+  deliveryStatus: "sent",
+});
 
-  incoming.forEach((message) => {
-    byId.set(message.id, message);
-  });
-
-  return Array.from(byId.values()).sort((left, right) => {
+const sortMessages = (messages: ChatMessageListItem[]) =>
+  [...messages].sort((left, right) => {
     const timestampComparison = left.createdAt.localeCompare(right.createdAt);
 
     if (timestampComparison !== 0) {
@@ -66,10 +73,53 @@ const mergeMessages = (existing: ChatMessage[], incoming: ChatMessage[]) => {
 
     return left.id.localeCompare(right.id);
   });
+
+const mergeRealtimeMessage = (
+  existing: ChatMessageListItem[],
+  incomingMessage: ChatMessage
+) => {
+  const incoming = toMessageListItem(incomingMessage);
+  let hasMatch = false;
+  const next = existing.map((message) => {
+    if (message.id === incoming.id) {
+      hasMatch = true;
+      return incoming;
+    }
+
+    if (
+      incoming.clientMessageId &&
+      message.clientMessageId === incoming.clientMessageId &&
+      message.senderUserId === incoming.senderUserId
+    ) {
+      hasMatch = true;
+      return incoming;
+    }
+
+    return message;
+  });
+
+  if (!hasMatch) {
+    next.push(incoming);
+  }
+
+  return sortMessages(next);
 };
 
-const getGeneralThreadId = (threads: ChatThread[]) =>
-  threads.find((thread) => thread.type === "WORKSPACE_GENERAL")?.id ?? null;
+const formatTypingText = (names: string[]) => {
+  if (names.length === 0) {
+    return "";
+  }
+
+  if (names.length === 1) {
+    return `${names[0]} is typing...`;
+  }
+
+  if (names.length === 2) {
+    return `${names[0]} and ${names[1]} are typing...`;
+  }
+
+  return `${names[0]}, ${names[1]} and others are typing...`;
+};
 
 export function ChatPanel({
   className,
@@ -83,14 +133,22 @@ export function ChatPanel({
   const [currentRole, setCurrentRole] = useState<WorkspaceMemberRole | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessageListItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
   const [isThreadsLoading, setIsThreadsLoading] = useState(false);
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
+  const [viewingDiagramUsers, setViewingDiagramUsers] = useState<PresenceUser[]>([]);
+  const [typingUserIdsByThread, setTypingUserIdsByThread] = useState<Record<string, string[]>>(
+    {}
+  );
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
+  const lastTypingThreadIdRef = useRef<string | null>(null);
 
   const resetThreadState = useCallback(() => {
     setThreads([]);
@@ -100,6 +158,9 @@ export function ChatPanel({
     setCurrentRole(null);
     setWorkspaceName("Workspace");
     setComposerValue("");
+    setOnlineUsers([]);
+    setViewingDiagramUsers([]);
+    setTypingUserIdsByThread({});
   }, []);
 
   const scrollToBottom = useCallback(() => {
@@ -112,6 +173,21 @@ export function ChatPanel({
     container.scrollTop = container.scrollHeight;
   }, []);
 
+  const updateThreadTimestamp = useCallback((threadId: string, updatedAt: string) => {
+    setThreads((current) =>
+      orderThreads(
+        current.map((thread) =>
+          thread.id === threadId
+            ? {
+                ...thread,
+                updatedAt,
+              }
+            : thread
+        )
+      )
+    );
+  }, []);
+
   const reloadMessages = useCallback(
     async (threadId: string) => {
       setIsMessagesLoading(true);
@@ -120,9 +196,9 @@ export function ChatPanel({
 
       try {
         const response = await getChatMessages({ threadId });
-        const nextMessages = [...response.messages].reverse();
+        const nextMessages = [...response.messages].reverse().map(toMessageListItem);
 
-        setMessages(nextMessages);
+        setMessages(sortMessages(nextMessages));
         setNextCursor(response.nextCursor);
 
         requestAnimationFrame(() => {
@@ -139,8 +215,34 @@ export function ChatPanel({
     [scrollToBottom]
   );
 
+  const stopTyping = useCallback(
+    (threadIdOverride?: string | null) => {
+      const threadId = threadIdOverride ?? selectedThreadId;
+
+      if (!threadId || !isTypingRef.current) {
+        return;
+      }
+
+      const socket = getRealtimeSocket();
+
+      if (socket.connected) {
+        socket.emit("chat:typingStop", { threadId });
+      }
+
+      isTypingRef.current = false;
+
+      if (typingStopTimerRef.current) {
+        clearTimeout(typingStopTimerRef.current);
+        typingStopTimerRef.current = null;
+      }
+    },
+    [selectedThreadId]
+  );
+
   useEffect(() => {
     if (!isOpen) {
+      stopTyping(lastTypingThreadIdRef.current);
+      lastTypingThreadIdRef.current = null;
       return;
     }
 
@@ -213,7 +315,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [diagramId, diagramTitle, isOpen, resetThreadState, workspaceId]);
+  }, [diagramId, diagramTitle, isOpen, resetThreadState, stopTyping, workspaceId]);
 
   useEffect(() => {
     if (!isOpen || !workspaceId || !selectedThreadId) {
@@ -223,50 +325,188 @@ export function ChatPanel({
     void reloadMessages(selectedThreadId);
   }, [isOpen, reloadMessages, selectedThreadId, workspaceId]);
 
-  const pollSelectedThread = useCallback(async () => {
-    if (!selectedThreadId) {
+  useEffect(() => {
+    if (!isOpen || !workspaceId) {
       return;
     }
 
-    const container = messagesContainerRef.current;
-    const shouldStickToBottom =
-      !container ||
-      container.scrollHeight - container.scrollTop - container.clientHeight <
-        NEAR_BOTTOM_THRESHOLD;
+    const socket = getRealtimeSocket();
 
-    try {
-      const response = await getChatMessages({ threadId: selectedThreadId });
-      const latestMessages = [...response.messages].reverse();
+    if (!socket.connected) {
+      socket.connect();
+    }
 
-      setMessages((current) => {
-        const merged = mergeMessages(current, latestMessages);
+    const handleConnect = () => {
+      setSocketConnected(true);
+      socket.emit("auth:init", {
+        workspaceId,
+        diagramId: diagramId ?? undefined,
+        threadId: selectedThreadId ?? undefined,
+      });
+    };
 
-        if (shouldStickToBottom && merged.length > current.length) {
-          requestAnimationFrame(() => {
-            scrollToBottom();
-          });
+    const handleDisconnect = () => {
+      setSocketConnected(false);
+    };
+
+    const handlePresenceSnapshot = (payload: PresencePayload) => {
+      if (payload.workspaceId !== workspaceId) {
+        return;
+      }
+
+      setOnlineUsers(payload.onlineUsers);
+      setViewingDiagramUsers(payload.viewingDiagramUsers);
+    };
+
+    const handlePresenceUpdate = (payload: PresencePayload) => {
+      if (payload.workspaceId !== workspaceId) {
+        return;
+      }
+
+      setOnlineUsers(payload.onlineUsers);
+      setViewingDiagramUsers(payload.viewingDiagramUsers);
+    };
+
+    const handleNewMessage = ({
+      message,
+    }: {
+      message: ChatMessage;
+      clientMessageId?: string;
+      senderUserId: string;
+    }) => {
+      const container = messagesContainerRef.current;
+      const shouldStickToBottom =
+        !container ||
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+          NEAR_BOTTOM_THRESHOLD;
+
+      setMessages((current) => mergeRealtimeMessage(current, message));
+      updateThreadTimestamp(message.threadId, message.createdAt);
+
+      if (shouldStickToBottom) {
+        requestAnimationFrame(() => {
+          scrollToBottom();
+        });
+      }
+    };
+
+    const handleSentAck = ({
+      clientMessageId,
+      messageId,
+      createdAt,
+    }: {
+      clientMessageId: string;
+      messageId: string;
+      createdAt: string;
+    }) => {
+      if (!currentUserId) {
+        return;
+      }
+
+      setMessages((current) =>
+        sortMessages(
+          current.map((message) =>
+            message.senderUserId === currentUserId &&
+            message.clientMessageId === clientMessageId
+              ? {
+                  ...message,
+                  id: messageId,
+                  createdAt,
+                  deliveryStatus: "sent",
+                }
+              : message
+          )
+        )
+      );
+    };
+
+    const handleTyping = ({
+      threadId,
+      userId,
+      isTyping,
+    }: {
+      threadId: string;
+      userId: string;
+      isTyping: boolean;
+    }) => {
+      setTypingUserIdsByThread((current) => {
+        const existing = current[threadId] ?? [];
+
+        if (isTyping) {
+          if (existing.includes(userId)) {
+            return current;
+          }
+
+          return {
+            ...current,
+            [threadId]: [...existing, userId],
+          };
         }
 
-        return merged;
+        if (!existing.includes(userId)) {
+          return current;
+        }
+
+        const nextUsers = existing.filter((id) => id !== userId);
+
+        return {
+          ...current,
+          [threadId]: nextUsers,
+        };
       });
-    } catch {
-      // Silent on polling failures.
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("presence:snapshot", handlePresenceSnapshot);
+    socket.on("presence:update", handlePresenceUpdate);
+    socket.on("chat:newMessage", handleNewMessage);
+    socket.on("chat:sentAck", handleSentAck);
+    socket.on("chat:typing", handleTyping);
+
+    if (socket.connected) {
+      setSocketConnected(true);
+      handleConnect();
     }
-  }, [scrollToBottom, selectedThreadId]);
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("presence:snapshot", handlePresenceSnapshot);
+      socket.off("presence:update", handlePresenceUpdate);
+      socket.off("chat:newMessage", handleNewMessage);
+      socket.off("chat:sentAck", handleSentAck);
+      socket.off("chat:typing", handleTyping);
+    };
+  }, [
+    currentUserId,
+    diagramId,
+    isOpen,
+    scrollToBottom,
+    selectedThreadId,
+    updateThreadTimestamp,
+    workspaceId,
+  ]);
 
   useEffect(() => {
-    if (!isOpen || !workspaceId || !selectedThreadId) {
+    if (!selectedThreadId) {
+      stopTyping(lastTypingThreadIdRef.current);
+      lastTypingThreadIdRef.current = null;
       return;
     }
 
-    const interval = window.setInterval(() => {
-      void pollSelectedThread();
-    }, POLL_INTERVAL_MS);
+    if (lastTypingThreadIdRef.current && lastTypingThreadIdRef.current !== selectedThreadId) {
+      stopTyping(lastTypingThreadIdRef.current);
+    }
 
+    lastTypingThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId, stopTyping]);
+
+  useEffect(() => {
     return () => {
-      window.clearInterval(interval);
+      stopTyping(lastTypingThreadIdRef.current);
     };
-  }, [isOpen, pollSelectedThread, selectedThreadId, workspaceId]);
+  }, [stopTyping]);
 
   const handleLoadMore = useCallback(async () => {
     if (!selectedThreadId || !nextCursor || isLoadingMore) {
@@ -284,7 +524,7 @@ export function ChatPanel({
         threadId: selectedThreadId,
         cursor: nextCursor,
       });
-      const older = [...response.messages].reverse();
+      const older = [...response.messages].reverse().map(toMessageListItem);
 
       setMessages((current) => {
         const existingIds = new Set(current.map((message) => message.id));
@@ -311,8 +551,88 @@ export function ChatPanel({
     }
   }, [isLoadingMore, nextCursor, selectedThreadId]);
 
-  const handleSendMessage = useCallback(async () => {
-    if (!selectedThreadId || isSending) {
+  const markMessageAsFailed = useCallback(
+    (clientMessageId: string) => {
+      if (!currentUserId) {
+        return;
+      }
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.senderUserId === currentUserId &&
+          message.clientMessageId === clientMessageId &&
+          message.deliveryStatus !== "sent"
+            ? {
+                ...message,
+                deliveryStatus: "failed",
+              }
+            : message
+        )
+      );
+    },
+    [currentUserId]
+  );
+
+  const emitSendMessage = useCallback(
+    ({
+      clientMessageId,
+      content,
+      threadId,
+    }: {
+      clientMessageId: string;
+      content: string;
+      threadId: string;
+    }) => {
+      const socket = getRealtimeSocket();
+
+      if (!socket.connected) {
+        markMessageAsFailed(clientMessageId);
+        toast.error("Realtime connection is unavailable.");
+        return;
+      }
+
+      let isResolved = false;
+      const timeoutId = window.setTimeout(() => {
+        if (isResolved) {
+          return;
+        }
+
+        isResolved = true;
+        markMessageAsFailed(clientMessageId);
+      }, SEND_TIMEOUT_MS);
+
+      socket.emit(
+        "chat:send",
+        {
+          threadId,
+          content,
+          clientMessageId,
+        },
+        (response) => {
+          if (isResolved) {
+            return;
+          }
+
+          isResolved = true;
+          window.clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            markMessageAsFailed(clientMessageId);
+
+            if (response.code === "FORBIDDEN") {
+              toast.error("You don't have permission to send messages.");
+            } else {
+              toast.error(response.error);
+            }
+          }
+        }
+      );
+    },
+    [markMessageAsFailed]
+  );
+
+  const handleSendMessage = useCallback(() => {
+    if (!selectedThreadId || !currentUserId) {
       return;
     }
 
@@ -322,45 +642,119 @@ export function ChatPanel({
       return;
     }
 
-    setIsSending(true);
+    stopTyping(selectedThreadId);
+    setComposerValue("");
 
-    try {
-      const message = await sendChatMessage({
-        threadId: selectedThreadId,
-        content: normalizedContent,
-      });
+    const nowIso = new Date().toISOString();
+    const clientMessageId = createClientMessageId();
+    const currentUser =
+      onlineUsers.find((user) => user.id === currentUserId) ??
+      messages.find((message) => message.senderUserId === currentUserId)?.sender ?? {
+        id: currentUserId,
+        name: "You",
+        image: null,
+      };
 
-      setMessages((current) => mergeMessages(current, [message]));
-      setThreads((current) =>
-        orderThreads(
-          current.map((thread) =>
-            thread.id === selectedThreadId
-              ? {
-                  ...thread,
-                  updatedAt: message.createdAt,
-                }
-              : thread
-          )
+    setMessages((current) =>
+      sortMessages([
+        ...current,
+        {
+          id: `optimistic:${clientMessageId}`,
+          threadId: selectedThreadId,
+          workspaceId: workspaceId ?? "",
+          senderUserId: currentUserId,
+          clientMessageId,
+          content: normalizedContent,
+          createdAt: nowIso,
+          editedAt: null,
+          deletedAt: null,
+          sender: {
+            id: currentUser.id,
+            name: currentUser.name,
+            image: currentUser.image,
+          },
+          deliveryStatus: "pending",
+        },
+      ])
+    );
+    updateThreadTimestamp(selectedThreadId, nowIso);
+
+    requestAnimationFrame(() => {
+      scrollToBottom();
+    });
+
+    emitSendMessage({
+      clientMessageId,
+      content: normalizedContent,
+      threadId: selectedThreadId,
+    });
+  }, [
+    composerValue,
+    currentUserId,
+    emitSendMessage,
+    messages,
+    onlineUsers,
+    scrollToBottom,
+    selectedThreadId,
+    stopTyping,
+    updateThreadTimestamp,
+    workspaceId,
+  ]);
+
+  const handleRetryMessage = useCallback(
+    (clientMessageId: string) => {
+      const failedMessage = messages.find(
+        (message) => message.clientMessageId === clientMessageId
+      );
+
+      if (!failedMessage || !selectedThreadId) {
+        return;
+      }
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.clientMessageId === clientMessageId
+            ? {
+                ...message,
+                deliveryStatus: "pending",
+              }
+            : message
         )
       );
-      setComposerValue("");
 
-      requestAnimationFrame(() => {
-        scrollToBottom();
+      emitSendMessage({
+        clientMessageId,
+        content: failedMessage.content,
+        threadId: selectedThreadId,
       });
-    } catch (error) {
-      if (error instanceof ChatApiError && error.status === 403) {
-        toast.error("You don't have permission to send messages.");
-      } else {
-        toast.error(error instanceof Error ? error.message : "Failed to send message.");
-      }
-    } finally {
-      setIsSending(false);
+    },
+    [emitSendMessage, messages, selectedThreadId]
+  );
+
+  const handleTypingActivity = useCallback(() => {
+    if (!selectedThreadId || !socketConnected) {
+      return;
     }
-  }, [composerValue, isSending, scrollToBottom, selectedThreadId]);
+
+    const socket = getRealtimeSocket();
+
+    if (!isTypingRef.current) {
+      socket.emit("chat:typingStart", { threadId: selectedThreadId });
+      isTypingRef.current = true;
+    }
+
+    if (typingStopTimerRef.current) {
+      clearTimeout(typingStopTimerRef.current);
+    }
+
+    typingStopTimerRef.current = setTimeout(() => {
+      stopTyping(selectedThreadId);
+    }, TYPING_IDLE_MS);
+  }, [selectedThreadId, socketConnected, stopTyping]);
 
   const isViewer = currentRole === "VIEWER";
-  const canSend = !isViewer && Boolean(selectedThreadId) && !isThreadsLoading;
+  const canSend =
+    !isViewer && Boolean(selectedThreadId) && !isThreadsLoading && socketConnected;
   const composerDisabledReason = useMemo(() => {
     if (isViewer) {
       return "Viewers can't send messages";
@@ -374,8 +768,38 @@ export function ChatPanel({
       return "Select a thread to start chatting";
     }
 
+    if (!socketConnected) {
+      return "Connecting realtime...";
+    }
+
     return undefined;
-  }, [isThreadsLoading, isViewer, selectedThreadId]);
+  }, [isThreadsLoading, isViewer, selectedThreadId, socketConnected]);
+
+  const userNameById = useMemo(() => {
+    const lookup = new Map<string, string>();
+
+    for (const user of onlineUsers) {
+      lookup.set(user.id, user.name);
+    }
+
+    for (const message of messages) {
+      lookup.set(message.senderUserId, message.sender.name);
+    }
+
+    return lookup;
+  }, [messages, onlineUsers]);
+
+  const typingUserNames = useMemo(() => {
+    if (!selectedThreadId) {
+      return [] as string[];
+    }
+
+    const userIds = typingUserIdsByThread[selectedThreadId] ?? [];
+
+    return userIds
+      .filter((userId) => userId !== currentUserId)
+      .map((userId) => userNameById.get(userId) ?? "Someone");
+  }, [currentUserId, selectedThreadId, typingUserIdsByThread, userNameById]);
 
   if (!workspaceId) {
     return (
@@ -410,6 +834,8 @@ export function ChatPanel({
         threads={threads}
         selectedThreadId={selectedThreadId}
         onThreadChange={setSelectedThreadId}
+        onlineUsers={onlineUsers}
+        viewingDiagramUsers={viewingDiagramUsers}
         disabled={isThreadsLoading}
       />
 
@@ -425,15 +851,25 @@ export function ChatPanel({
         onLoadMore={() => {
           void handleLoadMore();
         }}
+        onRetryMessage={handleRetryMessage}
       />
+
+      <p className="mt-2 min-h-4 px-1 text-xs text-zinc-500 dark:text-zinc-400">
+        {formatTypingText(typingUserNames)}
+      </p>
 
       <ChatComposer
         value={composerValue}
-        onValueChange={setComposerValue}
-        onSend={() => {
-          void handleSendMessage();
+        onValueChange={(value) => {
+          setComposerValue(value);
+
+          if (value.trim().length === 0) {
+            stopTyping(selectedThreadId);
+          }
         }}
-        isSending={isSending}
+        onTypingActivity={handleTypingActivity}
+        onSend={handleSendMessage}
+        isSending={false}
         canSend={canSend}
         disabledReason={composerDisabledReason}
       />

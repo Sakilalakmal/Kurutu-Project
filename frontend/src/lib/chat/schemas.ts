@@ -25,6 +25,7 @@ export const createDiagramThreadSchema = z.object({
 export const postMessageSchema = z.object({
   threadId: threadIdSchema,
   content: z.string().trim().min(1).max(1000),
+  clientMessageId: z.string().trim().min(1).max(128).optional(),
 });
 
 export const chatThreadDiagramSchema = z.object({
@@ -45,8 +46,12 @@ export const chatThreadSchema = z.object({
 
 export const chatMessageSenderSchema = z.object({
   id: z.string().min(1),
-  name: z.string().min(1),
-  image: z.string().nullable(),
+  name: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1))
+    .catch("User"),
+  image: z.string().nullable().optional().default(null),
 });
 
 export const chatMessageSchema = z.object({
@@ -54,10 +59,11 @@ export const chatMessageSchema = z.object({
   threadId: z.string().min(1),
   workspaceId: z.string().min(1),
   senderUserId: z.string().min(1),
+  clientMessageId: z.string().nullable().optional().default(null),
   content: z.string(),
   createdAt: z.string(),
-  editedAt: z.string().nullable(),
-  deletedAt: z.string().nullable(),
+  editedAt: z.string().nullable().optional().default(null),
+  deletedAt: z.string().nullable().optional().default(null),
   sender: chatMessageSenderSchema,
 });
 

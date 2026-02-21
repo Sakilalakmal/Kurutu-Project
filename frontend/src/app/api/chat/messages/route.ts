@@ -65,12 +65,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid message payload." }, { status: 400 });
     }
 
-    const message = await createMessage(
+    const result = await createMessage(
       parsedPayload.data.threadId,
-      parsedPayload.data.content
+      parsedPayload.data.content,
+      undefined,
+      parsedPayload.data.clientMessageId
     );
 
-    return NextResponse.json({ message }, { status: 201 });
+    return NextResponse.json({ message: result.message }, { status: 201 });
   } catch (error) {
     if (isWorkspaceAuthzError(error)) {
       return NextResponse.json({ error: error.message }, { status: error.status });

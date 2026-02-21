@@ -14,6 +14,7 @@ import {
 type ChatComposerProps = {
   value: string;
   onValueChange: (value: string) => void;
+  onTypingActivity?: () => void;
   onSend: () => void;
   isSending: boolean;
   canSend: boolean;
@@ -23,6 +24,7 @@ type ChatComposerProps = {
 export function ChatComposer({
   value,
   onValueChange,
+  onTypingActivity,
   onSend,
   isSending,
   canSend,
@@ -66,7 +68,13 @@ export function ChatComposer({
     <form onSubmit={handleSubmit} className="mt-3 flex items-end gap-2">
       <Textarea
         value={value}
-        onChange={(event) => onValueChange(event.target.value)}
+        onChange={(event) => {
+          onValueChange(event.target.value);
+
+          if (canSend) {
+            onTypingActivity?.();
+          }
+        }}
         onKeyDown={handleKeyDown}
         aria-label="Chat message input"
         placeholder="Type a message..."

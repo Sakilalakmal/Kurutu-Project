@@ -1,6 +1,6 @@
-import { getServerSession } from "@/app/lib/auth";
-import { prisma } from "@/app/lib/prisma";
-import type { WorkspaceMemberRole } from "@/lib/workspace/types";
+import { getServerSession } from "../../app/lib/auth";
+import { prisma } from "../../app/lib/prisma";
+import type { WorkspaceMemberRole } from "./types";
 
 const workspaceRoleRank: Record<WorkspaceMemberRole, number> = {
   VIEWER: 1,
