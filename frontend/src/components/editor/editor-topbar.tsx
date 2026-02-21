@@ -54,8 +54,6 @@ type EditorTopbarProps = {
   onTitleChange: (nextTitle: string) => void;
   onSave: () => void;
   saveStatus: SaveStatus;
-  lastSavedAt: string | null;
-  isDirty: boolean;
   pages: Array<{ id: string; name: string }>;
   activePageId: string | null;
   onPageChange: (pageId: string) => void;
@@ -81,35 +79,12 @@ type EditorTopbarProps = {
   isCopyShareSuccess: boolean;
 };
 
-const formatSaveMeta = (status: SaveStatus, savedAt: string | null) => {
-  if (status === "saving") {
-    return "Saving...";
-  }
-
-  if (status === "error") {
-    return "Save failed";
-  }
-
-  if (status === "saved" && savedAt) {
-    const timestamp = new Date(savedAt).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    return `Saved ${timestamp}`;
-  }
-
-  return "Ready";
-};
-
 export function EditorTopbar({
   workspaceSwitcher,
   title,
   onTitleChange,
   onSave,
   saveStatus,
-  lastSavedAt,
-  isDirty,
   pages,
   activePageId,
   onPageChange,
@@ -141,40 +116,27 @@ export function EditorTopbar({
 
   return (
     <TooltipProvider>
-      <header className="flex h-16 items-center gap-3 border-b border-zinc-200/80 bg-white/80 px-3 backdrop-blur dark:border-zinc-800/80 dark:bg-zinc-950/80 sm:px-5">
-        <input
-          value={title}
-          onChange={(event) => onTitleChange(event.target.value)}
-          aria-label="Diagram title"
-          className="h-9 w-[180px] rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-zinc-900 outline-none transition-colors focus:border-zinc-300 focus:bg-white dark:text-zinc-100 dark:focus:border-zinc-700 dark:focus:bg-zinc-900 sm:w-[240px] lg:w-[320px]"
-        />
-        {workspaceSwitcher ? <div className="hidden md:block">{workspaceSwitcher}</div> : null}
-        <div className="hidden lg:block">
-          <PageSwitcher
-            pages={pages}
-            activePageId={activePageId}
-            onPageChange={onPageChange}
-            onAddPage={onAddPage}
-            disabled={isPageDisabled}
+      <header className="flex flex-wrap items-center gap-2 border-b border-zinc-200/80 bg-white/80 px-3 py-2 backdrop-blur dark:border-zinc-800/80 dark:bg-zinc-950/80 sm:px-5">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <input
+            value={title}
+            onChange={(event) => onTitleChange(event.target.value)}
+            aria-label="Diagram title"
+            className="h-9 min-w-[120px] max-w-[320px] flex-1 rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-zinc-900 outline-none transition-colors focus:border-zinc-300 focus:bg-white dark:text-zinc-100 dark:focus:border-zinc-700 dark:focus:bg-zinc-900"
           />
+          {workspaceSwitcher ? <div className="hidden md:block">{workspaceSwitcher}</div> : null}
+          <div className="hidden lg:block">
+            <PageSwitcher
+              pages={pages}
+              activePageId={activePageId}
+              onPageChange={onPageChange}
+              onAddPage={onAddPage}
+              disabled={isPageDisabled}
+            />
+          </div>
+
         </div>
-
-        <span
-          className={cn(
-            "hidden text-xs xl:inline",
-            saveStatus === "error" ? "text-red-600" : "text-zinc-500 dark:text-zinc-400"
-          )}
-        >
-          {formatSaveMeta(saveStatus, lastSavedAt)}
-        </span>
-
-        {isDirty ? (
-          <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200 xl:inline">
-            Unsaved changes
-          </span>
-        ) : null}
-
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 lg:w-auto lg:flex-nowrap">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -398,7 +360,7 @@ export function EditorTopbar({
             </PopoverContent>
           </Popover>
 
-          <AvatarGroup className="hidden xl:flex">
+          <AvatarGroup className="hidden 2xl:flex">
             <Avatar size="sm">
               <AvatarFallback>AZ</AvatarFallback>
             </Avatar>

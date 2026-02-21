@@ -23,6 +23,7 @@ export default async function EditorPage({
     <EditorShell
       initialDiagramId={requestedDiagramId}
       initialWorkspaceId={requestedWorkspaceId}
+      initialUserId={session.user.id}
     />
   );
 }
