@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cormorant_Garamond, Manrope } from "next/font/google";
+import { Providers } from "@/app/providers";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -40,8 +41,10 @@ export default function RootLayout({
         className={`${landingSans.variable} ${landingSerif.variable} ${landingMono.variable} antialiased`}
       >
         <ThemeProvider>
-          {children}
-          <Toaster position="top-right" />
+          <Providers>
+            {children}
+            <Toaster position="top-right" />
+          </Providers>
         </ThemeProvider>
       </body>
     </html>
