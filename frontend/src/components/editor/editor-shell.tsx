@@ -109,6 +109,27 @@ const SMART_SNAP_THRESHOLD = 6;
 const POSITION_EPSILON = 0.001;
 const RIGHT_SIDEBAR_COLLAPSED_KEY = "kurutu:ui:rightSidebarCollapsed";
 
+const formatSaveMeta = (status: SaveStatus, savedAt: string | null) => {
+  if (status === "saving") {
+    return "Saving...";
+  }
+
+  if (status === "error") {
+    return "Save failed";
+  }
+
+  if (status === "saved" && savedAt) {
+    const timestamp = new Date(savedAt).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    return `Saved ${timestamp}`;
+  }
+
+  return "Ready";
+};
+
 const createNodeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
@@ -198,9 +219,11 @@ const areSnapGuidesEqual = (left: SnapGuides | null, right: SnapGuides | null) =
 export function EditorShell({
   initialDiagramId = null,
   initialWorkspaceId = null,
+  initialUserId = null,
 }: {
   initialDiagramId?: string | null;
   initialWorkspaceId?: string | null;
+  initialUserId?: string | null;
 }) {
   const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(
     initialWorkspaceId
@@ -2635,8 +2658,6 @@ export function EditorShell({
               onTitleChange={setTitle}
               onSave={handleManualSave}
               saveStatus={saveStatus}
-              lastSavedAt={lastSavedAt}
-              isDirty={isDirty}
               pages={pages.map((page) => ({ id: page.id, name: page.name }))}
               activePageId={activePageId}
               onPageChange={handlePageSwitch}
@@ -2661,6 +2682,24 @@ export function EditorShell({
               onCopyShareUrl={handleCopyShareUrl}
               isCopyShareSuccess={isCopyShareSuccess}
             />
+            <div className="border-b border-zinc-200/70 bg-white/70 px-3 py-1.5 dark:border-zinc-800/70 dark:bg-zinc-950/70 sm:px-5">
+              <div className="flex items-center gap-2 text-xs">
+                <span
+                  className={
+                    saveStatus === "error"
+                      ? "font-medium text-red-600"
+                      : "text-zinc-600 dark:text-zinc-300"
+                  }
+                >
+                  {formatSaveMeta(saveStatus, lastSavedAt)}
+                </span>
+                {isDirty ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+                    Unsaved changes
+                  </span>
+                ) : null}
+              </div>
+            </div>
             <div className="flex min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-5">
               <aside className="min-h-0 w-[280px] shrink-0">
                 <div className="flex h-full flex-col gap-3 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -2873,7 +2912,14 @@ export function EditorShell({
           <SheetHeader className="px-1 pb-2">
             <SheetTitle>Chat</SheetTitle>
           </SheetHeader>
-          <EditorChatPanel className="h-[calc(100vh-7rem)]" />
+          <EditorChatPanel
+            className="h-[calc(100vh-7rem)]"
+            isOpen={isChatSheetOpen}
+            workspaceId={currentWorkspaceId}
+            diagramId={diagramId}
+            diagramTitle={title}
+            currentUserId={initialUserId}
+          />
         </SheetContent>
       </Sheet>
       <TemplatesDialog
