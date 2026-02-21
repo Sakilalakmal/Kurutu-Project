@@ -52,7 +52,7 @@ export function AuthCard() {
       return value;
     }
 
-    return "/home";
+    return "/workspaces";
   }, [searchParams]);
   const activeError = clientError ?? queryError;
 

@@ -49,10 +49,32 @@ export async function PATCH(
 
   const diagram = await prisma.diagram.findUnique({
     where: { id: diagramId },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, workspaceId: true },
   });
 
-  if (!diagram || diagram.userId !== userId) {
+  if (!diagram) {
+    return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+  }
+
+  if (diagram.workspaceId) {
+    const member = await prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: diagram.workspaceId,
+          userId,
+        },
+      },
+      select: { role: true },
+    });
+
+    if (!member) {
+      return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+    }
+
+    if (member.role !== "OWNER") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } else if (diagram.userId !== userId) {
     return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
   }
 

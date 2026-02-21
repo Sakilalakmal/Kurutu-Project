@@ -3,11 +3,25 @@ import { getServerSession } from "@/app/lib/auth";
 import { AuthCard } from "@/components/auth/auth-card";
 import { BentoPreview } from "@/components/auth/bento-preview";
 
-export default async function LoginPage() {
+const resolveCallbackUrl = (value: string | undefined) => {
+  if (value && value.startsWith("/")) {
+    return value;
+  }
+
+  return "/workspaces";
+};
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ callbackUrl?: string }> | { callbackUrl?: string };
+}) {
   const session = await getServerSession();
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const callbackUrl = resolveCallbackUrl(resolvedSearchParams.callbackUrl);
 
   if (session) {
-    redirect("/home");
+    redirect(callbackUrl);
   }
 
   return (

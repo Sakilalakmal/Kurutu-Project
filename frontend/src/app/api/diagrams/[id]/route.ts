@@ -33,13 +33,32 @@ export async function GET(
     where: { id: diagramId },
   });
 
-  if (!diagram || diagram.userId !== userId) {
+  if (!diagram) {
+    return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+  }
+
+  if (diagram.workspaceId) {
+    const member = await prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: diagram.workspaceId,
+          userId,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!member) {
+      return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+    }
+  } else if (diagram.userId !== userId) {
     return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
   }
 
   return NextResponse.json({
     diagram: {
       id: diagram.id,
+      workspaceId: diagram.workspaceId,
       title: diagram.title,
       isPublic: diagram.isPublic,
       data: migrateDiagramData(diagram.data),
@@ -77,10 +96,32 @@ export async function PUT(
 
   const diagram = await prisma.diagram.findUnique({
     where: { id: diagramId },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, workspaceId: true },
   });
 
-  if (!diagram || diagram.userId !== userId) {
+  if (!diagram) {
+    return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+  }
+
+  if (diagram.workspaceId) {
+    const member = await prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: diagram.workspaceId,
+          userId,
+        },
+      },
+      select: { role: true },
+    });
+
+    if (!member) {
+      return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
+    }
+
+    if (member.role === "VIEWER") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } else if (diagram.userId !== userId) {
     return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
   }
 
@@ -95,6 +136,7 @@ export async function PUT(
   return NextResponse.json({
     diagram: {
       id: updatedDiagram.id,
+      workspaceId: updatedDiagram.workspaceId,
       title: updatedDiagram.title,
       isPublic: updatedDiagram.isPublic,
       data: parsedPayload.data.data,

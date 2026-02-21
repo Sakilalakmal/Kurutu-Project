@@ -17,6 +17,7 @@ import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
 import { StylePanel } from "@/components/editor/StylePanel";
 import { TemplatesDialog } from "@/components/editor/TemplatesDialog";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
+import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import {
   EditorTopbar,
   type ExportBackground,
@@ -31,7 +32,6 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { Toaster } from "@/components/ui/sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { getAssetById } from "@/lib/assets/catalog";
 import { applyTemplate, createNodeFromAsset } from "@/lib/assets/builders";
@@ -100,6 +100,7 @@ import type {
   DiagramViewport,
   EditorTool,
 } from "@/lib/diagram/types";
+import { WORKSPACE_STORAGE_KEY } from "@/lib/workspace/types";
 
 const AUTOSAVE_DELAY_MS = 800;
 const EXPORT_PADDING = 48;
@@ -196,9 +197,14 @@ const areSnapGuidesEqual = (left: SnapGuides | null, right: SnapGuides | null) =
 
 export function EditorShell({
   initialDiagramId = null,
+  initialWorkspaceId = null,
 }: {
   initialDiagramId?: string | null;
+  initialWorkspaceId?: string | null;
 }) {
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState<string | null>(
+    initialWorkspaceId
+  );
   const [diagramId, setDiagramId] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled Diagram");
   const [isPublic, setIsPublic] = useState(false);
@@ -263,6 +269,35 @@ export function EditorShell({
   const dragSmartEnabledRef = useRef(false);
   const hasLoadedSidebarPreferenceRef = useRef(false);
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    setCurrentWorkspaceId(initialWorkspaceId);
+  }, [initialWorkspaceId]);
+
+  useEffect(() => {
+    if (initialWorkspaceId !== null || typeof window === "undefined") {
+      return;
+    }
+
+    const storedWorkspaceId = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+
+    if (storedWorkspaceId) {
+      setCurrentWorkspaceId((current) => current ?? storedWorkspaceId);
+    }
+  }, [initialWorkspaceId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (currentWorkspaceId) {
+      window.localStorage.setItem(WORKSPACE_STORAGE_KEY, currentWorkspaceId);
+      return;
+    }
+
+    window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+  }, [currentWorkspaceId]);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -958,6 +993,8 @@ export function EditorShell({
     let isCancelled = false;
 
     const loadDiagram = async () => {
+      setIsLoading(true);
+
       try {
         let diagram;
 
@@ -967,13 +1004,17 @@ export function EditorShell({
           } catch (error) {
             if (error instanceof DiagramApiError && error.status === 404) {
               toast.error("Requested diagram was not found. Loading your latest diagram instead.");
-              diagram = await fetchLatestDiagram();
+              diagram = await fetchLatestDiagram({
+                workspaceId: currentWorkspaceId,
+              });
             } else {
               throw error;
             }
           }
         } else {
-          diagram = await fetchLatestDiagram();
+          diagram = await fetchLatestDiagram({
+            workspaceId: currentWorkspaceId,
+          });
         }
 
         if (isCancelled) {
@@ -991,6 +1032,9 @@ export function EditorShell({
           normalizedPages.find((page) => page.id === resolvedActivePageId) ?? normalizedPages[0];
         const loadedTitle = diagram.title.trim().length > 0 ? diagram.title : "Untitled Diagram";
 
+        if (initialDiagramId) {
+          setCurrentWorkspaceId(diagram.workspaceId ?? null);
+        }
         setDiagramId(diagram.id);
         setTitle(loadedTitle);
         setIsPublic(diagram.isPublic);
@@ -1038,7 +1082,13 @@ export function EditorShell({
     return () => {
       isCancelled = true;
     };
-  }, [createPageSnapshot, hydratePage, initialDiagramId, syncHistoryAvailability]);
+  }, [
+    createPageSnapshot,
+    currentWorkspaceId,
+    hydratePage,
+    initialDiagramId,
+    syncHistoryAvailability,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -2575,6 +2625,12 @@ export function EditorShell({
         <div className="flex h-full w-full overflow-hidden border border-slate-300/80 bg-slate-100 p-1 dark:border-[#1f2937] dark:bg-[#060a13]">
           <section className="flex min-h-0 w-full flex-col overflow-hidden bg-[#edf1f4] dark:bg-[#0f1724]">
             <EditorTopbar
+              workspaceSwitcher={
+                <WorkspaceSwitcher
+                  currentWorkspaceId={currentWorkspaceId}
+                  onWorkspaceChange={setCurrentWorkspaceId}
+                />
+              }
               title={title}
               onTitleChange={setTitle}
               onSave={handleManualSave}
@@ -2827,7 +2883,6 @@ export function EditorShell({
         onUseTemplate={handleApplyTemplate}
         disabled={isLoading}
       />
-      <Toaster position="top-right" />
     </>
   );
 }

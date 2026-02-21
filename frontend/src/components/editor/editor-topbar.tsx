@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import {
   Check,
   Copy,
@@ -48,6 +49,7 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 type ExportBackground = "transparent" | "white";
 
 type EditorTopbarProps = {
+  workspaceSwitcher?: ReactNode;
   title: string;
   onTitleChange: (nextTitle: string) => void;
   onSave: () => void;
@@ -101,6 +103,7 @@ const formatSaveMeta = (status: SaveStatus, savedAt: string | null) => {
 };
 
 export function EditorTopbar({
+  workspaceSwitcher,
   title,
   onTitleChange,
   onSave,
@@ -145,6 +148,7 @@ export function EditorTopbar({
           aria-label="Diagram title"
           className="h-9 w-[180px] rounded-md border border-transparent bg-transparent px-2 text-sm font-semibold text-zinc-900 outline-none transition-colors focus:border-zinc-300 focus:bg-white dark:text-zinc-100 dark:focus:border-zinc-700 dark:focus:bg-zinc-900 sm:w-[240px] lg:w-[320px]"
         />
+        {workspaceSwitcher ? <div className="hidden md:block">{workspaceSwitcher}</div> : null}
         <div className="hidden lg:block">
           <PageSwitcher
             pages={pages}
