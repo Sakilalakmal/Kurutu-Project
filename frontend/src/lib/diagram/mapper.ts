@@ -5,6 +5,7 @@ import {
   getDefaultNodeSize,
   getDefaultNodeStyle,
 } from "@/lib/diagram/defaults";
+import { getNodeSize } from "@/lib/editor/size";
 import { toRuntimeEdgeType, toStoredEdgeStyle } from "@/lib/diagram/edges";
 import {
   cloneRelationEdgeData,
@@ -19,6 +20,13 @@ import type {
   DiagramNodeType,
   RelationEdgeData,
 } from "@/lib/diagram/types";
+
+export type NodeResizePayload = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 export type EditorNodeData = {
   text: string;
@@ -51,6 +59,8 @@ export type EditorNodeData = {
   onDataTableFieldAdd?: (nodeId: string) => void;
   onDataTableFieldDelete?: (nodeId: string, fieldId: string) => void;
   onDataTableFieldMove?: (nodeId: string, fieldId: string, direction: "up" | "down") => void;
+  onResize?: (nodeId: string, params: NodeResizePayload) => void;
+  onResizeEnd?: (nodeId: string, params: NodeResizePayload) => void;
   onLockedInteraction: () => void;
 };
 
@@ -86,7 +96,12 @@ export const toFlowNodes = (
   records: DiagramNodeRecord[],
   onTextChange: (nodeId: string, nextText: string) => void,
   onLockedInteraction: () => void,
-  options?: { readOnly?: boolean; autoEditNodeId?: string | null }
+  options?: {
+    readOnly?: boolean;
+    autoEditNodeId?: string | null;
+    onResize?: (nodeId: string, params: NodeResizePayload) => void;
+    onResizeEnd?: (nodeId: string, params: NodeResizePayload) => void;
+  }
 ): Node<EditorNodeData>[] =>
   records.map((record) => {
     const dataModel =
@@ -94,6 +109,13 @@ export const toFlowNodes = (
         ? sanitizeDataTableNodeData(record.data) ??
           createDefaultDataTableNodeData(record.text || "Table")
         : undefined;
+    const fallbackSize =
+      record.type === "dataTable" && dataModel
+        ? {
+            width: getDefaultNodeSize(record.type).width,
+            height: getDataTableNodeHeight(dataModel.fields.length),
+          }
+        : getDefaultNodeSize(record.type);
 
     return {
       id: record.id,
@@ -101,19 +123,15 @@ export const toFlowNodes = (
       position: record.position,
       data: {
         text: record.text,
-        size:
-          record.type === "dataTable" && dataModel
-            ? {
-                width: record.size.width,
-                height: getDataTableNodeHeight(dataModel.fields.length),
-              }
-            : record.size,
+        size: getNodeSize({ size: record.size }, fallbackSize),
         style: record.style,
         layerId: record.layerId,
         isLocked: false,
         isReadOnly: options?.readOnly ?? false,
         autoEdit: options?.autoEditNodeId === record.id,
         dataModel,
+        onResize: options?.onResize,
+        onResizeEnd: options?.onResizeEnd,
         onTextChange,
         onLockedInteraction,
       },
@@ -144,7 +162,13 @@ const toNodeRecord = (node: Node<EditorNodeData>, fallbackLayerId: string): Diag
     return null;
   }
 
-  const fallbackSize = getDefaultNodeSize(rawType);
+  const fallbackSize =
+    rawType === "dataTable" && node.data?.dataModel
+      ? {
+          width: getDefaultNodeSize(rawType).width,
+          height: getDataTableNodeHeight(node.data.dataModel.fields.length),
+        }
+      : getDefaultNodeSize(rawType);
   const fallbackStyle = getDefaultNodeStyle(rawType);
 
   return {
@@ -154,7 +178,7 @@ const toNodeRecord = (node: Node<EditorNodeData>, fallbackLayerId: string): Diag
       x: node.position.x,
       y: node.position.y,
     },
-    size: node.data?.size ?? fallbackSize,
+    size: getNodeSize(node.data, fallbackSize),
     text: node.data?.text ?? rawType,
     style: node.data?.style ?? fallbackStyle,
     layerId: node.data?.layerId ?? fallbackLayerId,
