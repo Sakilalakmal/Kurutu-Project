@@ -6,4 +6,23 @@ export const keys = {
     ["workspaces", "members", workspaceId] as const,
   diagram: (workspaceId: string, diagramId: string) =>
     ["diagram", workspaceId, diagramId] as const,
+  activityLogs: ({
+    workspaceId,
+    diagramId,
+    filter,
+    search,
+  }: {
+    workspaceId: string;
+    diagramId?: string | null;
+    filter?: string;
+    search?: string;
+  }) =>
+    [
+      "activity",
+      "logs",
+      workspaceId,
+      diagramId ?? "__workspace__",
+      filter ?? "all",
+      search ?? "",
+    ] as const,
 };

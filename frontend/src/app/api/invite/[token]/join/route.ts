@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { logActivity } from "@/lib/activity/logActivity";
 import {
   isWorkspaceAuthzError,
   requireUser,
@@ -142,6 +143,20 @@ export async function POST(
       if (updatedInviteCount.count !== 1) {
         throw new JoinInviteError(400, "This invite is no longer active.");
       }
+
+      await logActivity({
+        tx,
+        workspaceId: invite.workspaceId,
+        actorUserId: userId,
+        actionType: "MEMBER_JOIN",
+        entityType: "MEMBER",
+        entityId: userId,
+        summary: `joined the workspace as ${memberRole.toLowerCase()}`,
+        metadata: {
+          actorRole: memberRole,
+          inviteRole: invite.role,
+        },
+      });
 
       return {
         workspaceId: invite.workspaceId,

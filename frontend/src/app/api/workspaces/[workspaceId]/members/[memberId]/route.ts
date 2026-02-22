@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { logActivity } from "@/lib/activity/logActivity";
 import {
   isWorkspaceAuthzError,
   requireUser,
@@ -68,7 +69,7 @@ export async function PATCH(
   try {
     const { workspaceId, memberId } = await resolveParams(context.params);
 
-    await requireWorkspaceRole(workspaceId, "OWNER");
+    const actorMember = await requireWorkspaceRole(workspaceId, "OWNER");
 
     let payload: unknown;
 
@@ -89,6 +90,15 @@ export async function PATCH(
         id: memberId,
         workspaceId,
       },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
     });
 
     if (!targetMember) {
@@ -101,23 +111,47 @@ export async function PATCH(
       nextRole: parsedPayload.data.role,
     });
 
-    const updated = await prisma.workspaceMember.update({
-      where: {
-        id: targetMember.id,
-      },
-      data: {
-        role: parsedPayload.data.role,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
+    const shouldLogRoleChange = targetMember.role !== parsedPayload.data.role;
+    const updated = await prisma.$transaction(async (tx) => {
+      const nextMember = await tx.workspaceMember.update({
+        where: {
+          id: targetMember.id,
+        },
+        data: {
+          role: parsedPayload.data.role,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+            },
           },
         },
-      },
+      });
+
+      if (shouldLogRoleChange) {
+        await logActivity({
+          tx,
+          workspaceId,
+          actorUserId: actorMember.userId,
+          actionType: "MEMBER_ROLE_CHANGE",
+          entityType: "MEMBER",
+          entityId: targetMember.id,
+          summary: `changed ${targetMember.user.name}'s role from ${targetMember.role} to ${parsedPayload.data.role}`,
+          metadata: {
+            actorRole: actorMember.role,
+            targetUserId: targetMember.userId,
+            targetMemberId: targetMember.id,
+            previousRole: targetMember.role,
+            nextRole: parsedPayload.data.role,
+          },
+        });
+      }
+
+      return nextMember;
     });
 
     return NextResponse.json({ member: updated });
@@ -153,12 +187,21 @@ export async function DELETE(
     const { workspaceId, memberId } = await resolveParams(context.params);
     const { userId } = await requireUser();
 
-    await requireWorkspaceRole(workspaceId, "OWNER", userId);
+    const actorMember = await requireWorkspaceRole(workspaceId, "OWNER", userId);
 
     const targetMember = await prisma.workspaceMember.findFirst({
       where: {
         id: memberId,
         workspaceId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
     });
 
@@ -171,10 +214,28 @@ export async function DELETE(
       targetRole: targetMember.role,
     });
 
-    await prisma.workspaceMember.delete({
-      where: {
-        id: targetMember.id,
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.workspaceMember.delete({
+        where: {
+          id: targetMember.id,
+        },
+      });
+
+      await logActivity({
+        tx,
+        workspaceId,
+        actorUserId: actorMember.userId,
+        actionType: "MEMBER_REMOVE",
+        entityType: "MEMBER",
+        entityId: targetMember.id,
+        summary: `removed ${targetMember.user.name} from the workspace`,
+        metadata: {
+          actorRole: actorMember.role,
+          targetUserId: targetMember.userId,
+          targetMemberId: targetMember.id,
+          removedRole: targetMember.role,
+        },
+      });
     });
 
     return NextResponse.json({ success: true });

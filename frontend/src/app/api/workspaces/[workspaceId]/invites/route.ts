@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { logActivity } from "@/lib/activity/logActivity";
 import {
   isWorkspaceAuthzError,
   requireUser,
@@ -37,7 +38,7 @@ export async function POST(
     const workspaceId = await resolveWorkspaceId(context.params);
     const { userId } = await requireUser();
 
-    await requireWorkspaceRole(workspaceId, "OWNER", userId);
+    const actorMember = await requireWorkspaceRole(workspaceId, "OWNER", userId);
 
     let payload: unknown;
 
@@ -53,15 +54,35 @@ export async function POST(
       return NextResponse.json({ error: "Invalid invite payload." }, { status: 400 });
     }
 
-    const invite = await prisma.workspaceInvite.create({
-      data: {
+    const invite = await prisma.$transaction(async (tx) => {
+      const created = await tx.workspaceInvite.create({
+        data: {
+          workspaceId,
+          createdByUserId: userId,
+          role: parsedPayload.data.role,
+          token: createWorkspaceInviteToken(),
+          expiresAt: resolveInviteExpiryDate(parsedPayload.data.expiry),
+          maxUses: parsedPayload.data.maxUses ?? null,
+        },
+      });
+
+      await logActivity({
+        tx,
         workspaceId,
-        createdByUserId: userId,
-        role: parsedPayload.data.role,
-        token: createWorkspaceInviteToken(),
-        expiresAt: resolveInviteExpiryDate(parsedPayload.data.expiry),
-        maxUses: parsedPayload.data.maxUses ?? null,
-      },
+        actorUserId: userId,
+        actionType: "INVITE_CREATE",
+        entityType: "INVITE",
+        entityId: created.id,
+        summary: `created an invite link for ${created.role.toLowerCase()} access`,
+        metadata: {
+          actorRole: actorMember.role,
+          inviteRole: created.role,
+          expiresAt: created.expiresAt?.toISOString() ?? null,
+          maxUses: created.maxUses,
+        },
+      });
+
+      return created;
     });
 
     const origin = new URL(request.url).origin;
