@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useViewport } from "@xyflow/react";
-import type { SnapGuides } from "@/lib/diagram/smartSnap";
+import type { SnapGuides } from "@/lib/editor/snap";
 
 type SnapGuidesOverlayProps = {
   guides?: SnapGuides | null;

@@ -105,6 +105,7 @@ export const DataTableNode = memo(function DataTableNode({
         minHeight={dataTableMinSize.minHeight}
         handleClassName="!h-2.5 !w-2.5 !rounded-[4px] !border !border-white !bg-blue-500 shadow-sm"
         lineClassName="!border-blue-400/70"
+        onResizeStart={(_, params) => data.onResizeStart?.(id, params)}
         onResize={(_, params) => data.onResize?.(id, params)}
         onResizeEnd={(_, params) => data.onResizeEnd?.(id, params)}
       />
