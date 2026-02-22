@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
+import { logActivity } from "@/lib/activity/logActivity";
 import {
   isWorkspaceAuthzError,
   requireWorkspaceRole,
@@ -39,7 +40,7 @@ export async function PATCH(
   try {
     const { workspaceId, inviteId } = await resolveParams(context.params);
 
-    await requireWorkspaceRole(workspaceId, "OWNER");
+    const actorMember = await requireWorkspaceRole(workspaceId, "OWNER");
 
     const invite = await prisma.workspaceInvite.findFirst({
       where: {
@@ -49,6 +50,7 @@ export async function PATCH(
       select: {
         id: true,
         revokedAt: true,
+        role: true,
       },
     });
 
@@ -60,13 +62,29 @@ export async function PATCH(
       return NextResponse.json({ success: true });
     }
 
-    await prisma.workspaceInvite.update({
-      where: {
-        id: invite.id,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
+    await prisma.$transaction(async (tx) => {
+      await tx.workspaceInvite.update({
+        where: {
+          id: invite.id,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+
+      await logActivity({
+        tx,
+        workspaceId,
+        actorUserId: actorMember.userId,
+        actionType: "INVITE_REVOKE",
+        entityType: "INVITE",
+        entityId: invite.id,
+        summary: "revoked an invite link",
+        metadata: {
+          actorRole: actorMember.role,
+          inviteRole: invite.role,
+        },
+      });
     });
 
     return NextResponse.json({ success: true });

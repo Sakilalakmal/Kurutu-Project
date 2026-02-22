@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { EditorBottomControls } from "@/components/editor/editor-bottom-controls";
 import { EditorCanvas } from "@/components/editor/editor-canvas";
 import { EditorChatPanel } from "@/components/editor/editor-chat-panel";
+import { ActivityTerminalDrawer } from "@/components/editor/activity-terminal-drawer";
 import { StylePanel } from "@/components/editor/StylePanel";
 import { TemplatesDialog } from "@/components/editor/TemplatesDialog";
 import { EditorToolbar } from "@/components/editor/editor-toolbar";
@@ -286,6 +287,7 @@ export function EditorShell({
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isChatSheetOpen, setIsChatSheetOpen] = useState(false);
+  const [isActivitySheetOpen, setIsActivitySheetOpen] = useState(false);
   const [isMobileLayersSheetOpen, setIsMobileLayersSheetOpen] = useState(false);
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
@@ -3310,6 +3312,7 @@ export function EditorShell({
               onAddPage={handleAddPage}
               isPageDisabled={isLoading}
               onOpenChat={() => setIsChatSheetOpen(true)}
+              onOpenActivity={() => setIsActivitySheetOpen(true)}
               onOpenTemplates={() => setIsTemplatesOpen(true)}
               snapEnabled={snapEnabled}
               onToggleSnap={toggleSnapEnabled}
@@ -3330,6 +3333,7 @@ export function EditorShell({
               onCopyShareUrl={handleCopyShareUrl}
               isCopyShareSuccess={isCopyShareSuccess}
               diagramPresenceUsers={diagramPresenceUsers}
+              isActivityDisabled={!currentWorkspaceId}
             />
             <div className="border-b border-zinc-200/70 bg-white/70 px-3 py-1.5 dark:border-zinc-800/70 dark:bg-zinc-950/70 sm:px-5">
               <div className="flex items-center gap-2 text-xs">
@@ -3570,6 +3574,12 @@ export function EditorShell({
           />
         </SheetContent>
       </Sheet>
+      <ActivityTerminalDrawer
+        open={isActivitySheetOpen}
+        onOpenChange={setIsActivitySheetOpen}
+        workspaceId={currentWorkspaceId}
+        diagramId={diagramId}
+      />
       <TemplatesDialog
         open={isTemplatesOpen}
         onOpenChange={setIsTemplatesOpen}

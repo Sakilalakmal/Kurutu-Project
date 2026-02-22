@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { logActivity } from "@/lib/activity/logActivity";
 import { createEmptyDiagramDocument } from "@/lib/diagram/defaults";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
 import { diagramsLatestQuerySchema } from "@/lib/workspace/schemas";
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
   }
 
   const workspaceId = parsedQuery.data.workspaceId ?? null;
+  let workspaceRole: "OWNER" | "EDITOR" | "VIEWER" | null = null;
 
   if (workspaceId) {
     const member = await prisma.workspaceMember.findUnique({
@@ -37,12 +39,14 @@ export async function GET(request: Request) {
           userId,
         },
       },
-      select: { id: true },
+      select: { id: true, role: true },
     });
 
     if (!member) {
       return NextResponse.json({ error: "Workspace not found." }, { status: 404 });
     }
+
+    workspaceRole = member.role;
   }
 
   let diagram = await prisma.diagram.findFirst({
@@ -53,13 +57,34 @@ export async function GET(request: Request) {
   if (!diagram) {
     const emptyData = createEmptyDiagramDocument();
 
-    diagram = await prisma.diagram.create({
-      data: {
-        userId,
-        workspaceId,
-        title: "Untitled Diagram",
-        data: emptyData,
-      },
+    diagram = await prisma.$transaction(async (tx) => {
+      const created = await tx.diagram.create({
+        data: {
+          userId,
+          workspaceId,
+          title: "Untitled Diagram",
+          data: emptyData,
+        },
+      });
+
+      if (workspaceId) {
+        await logActivity({
+          tx,
+          workspaceId,
+          diagramId: created.id,
+          actorUserId: userId,
+          actionType: "DIAGRAM_CREATE",
+          entityType: "DIAGRAM",
+          entityId: created.id,
+          summary: `created diagram "${created.title}"`,
+          metadata: {
+            actorRole: workspaceRole,
+            diagramTitle: created.title,
+          },
+        });
+      }
+
+      return created;
     });
   }
 

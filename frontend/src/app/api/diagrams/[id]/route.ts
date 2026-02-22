@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
+import { diffDiagramActivity } from "@/lib/activity/diffDiagramActivity";
+import { logActivity } from "@/lib/activity/logActivity";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
 import { updateDiagramPayloadSchema } from "@/lib/diagram/types";
 
@@ -96,12 +98,14 @@ export async function PUT(
 
   const diagram = await prisma.diagram.findUnique({
     where: { id: diagramId },
-    select: { id: true, userId: true, workspaceId: true },
+    select: { id: true, userId: true, workspaceId: true, data: true },
   });
 
   if (!diagram) {
     return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
   }
+
+  let actorRole: "OWNER" | "EDITOR" | "VIEWER" | null = null;
 
   if (diagram.workspaceId) {
     const member = await prisma.workspaceMember.findUnique({
@@ -118,6 +122,8 @@ export async function PUT(
       return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
     }
 
+    actorRole = member.role;
+
     if (member.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -125,12 +131,35 @@ export async function PUT(
     return NextResponse.json({ error: "Diagram not found." }, { status: 404 });
   }
 
-  const updatedDiagram = await prisma.diagram.update({
-    where: { id: diagramId },
-    data: {
-      title: parsedPayload.data.title,
-      data: parsedPayload.data.data,
-    },
+  const activityEntries =
+    diagram.workspaceId && actorRole
+      ? diffDiagramActivity({
+          workspaceId: diagram.workspaceId,
+          diagramId,
+          actorUserId: userId,
+          actorRole,
+          previousData: diagram.data,
+          nextData: parsedPayload.data.data,
+        })
+      : [];
+
+  const updatedDiagram = await prisma.$transaction(async (tx) => {
+    const updated = await tx.diagram.update({
+      where: { id: diagramId },
+      data: {
+        title: parsedPayload.data.title,
+        data: parsedPayload.data.data,
+      },
+    });
+
+    for (const entry of activityEntries) {
+      await logActivity({
+        ...entry,
+        tx,
+      });
+    }
+
+    return updated;
   });
 
   return NextResponse.json({
