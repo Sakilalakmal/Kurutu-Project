@@ -47,7 +47,6 @@ import {
 } from "@/lib/diagram/api";
 import {
   createDataTableFieldId,
-  getDataTableNodeHeight,
   createDefaultNodeRecord,
   DEFAULT_GRID_SIZE,
   DEFAULT_SETTINGS,
@@ -80,10 +79,12 @@ import {
   toFlowNodes,
   type EditorEdge,
   type EditorNodeData,
+  type NodeResizePayload,
 } from "@/lib/diagram/mapper";
 import { migrateDiagramData } from "@/lib/diagram/migrate";
 import type { DiagramPresenceUser } from "@/lib/realtime/events";
 import { getSocket } from "@/lib/realtime/socket";
+import { getNodeMinSize, setNodeSize } from "@/lib/editor/size";
 import { snapPosition } from "@/lib/diagram/snap";
 import {
   buildSnapTargets,
@@ -159,6 +160,20 @@ const sanitizeFileName = (value: string) =>
 
 const isPlaceableNodeTool = (tool: EditorTool): tool is DiagramNodeType =>
   tool === "rectangle" || tool === "ellipse" || tool === "sticky";
+
+const isDiagramNodeTypeValue = (value: string | undefined): value is DiagramNodeType =>
+  value === "rectangle" ||
+  value === "ellipse" ||
+  value === "sticky" ||
+  value === "textNode" ||
+  value === "dataTable" ||
+  value === "wireframeButton" ||
+  value === "wireframeInput" ||
+  value === "wireframeCard" ||
+  value === "wireframeAvatar" ||
+  value === "wireframeNavbar" ||
+  value === "wireframeSidebar" ||
+  value === "wireframeModal";
 
 const resolveUniquePageName = (baseName: string, pages: DiagramPage[]) => {
   const normalized = baseName.trim().length > 0 ? baseName.trim() : "Template";
@@ -579,6 +594,117 @@ export function EditorShell({
     [pushHistorySnapshot, setNodes, showLayerLockedToast]
   );
 
+  const applyNodeResize = useCallback(
+    (
+      currentNodes: Node<EditorNodeData>[],
+      nodeId: string,
+      params: NodeResizePayload
+    ): { nextNodes: Node<EditorNodeData>[]; blocked: boolean } => {
+      const targetNode = currentNodes.find((node) => node.id === nodeId);
+
+      if (!targetNode) {
+        return { nextNodes: currentNodes, blocked: false };
+      }
+
+      if (isLayerLocked(layersRef.current, targetNode.data.layerId)) {
+        return { nextNodes: currentNodes, blocked: true };
+      }
+
+      if (!isDiagramNodeTypeValue(targetNode.type)) {
+        return { nextNodes: currentNodes, blocked: false };
+      }
+
+      const minSize = getNodeMinSize(targetNode.type);
+      const nextWidth = Number.isFinite(params.width)
+        ? Math.max(params.width, minSize.minWidth)
+        : targetNode.data.size.width;
+      const nextHeight = Number.isFinite(params.height)
+        ? Math.max(params.height, minSize.minHeight)
+        : targetNode.data.size.height;
+      const nextX = Number.isFinite(params.x) ? params.x : targetNode.position.x;
+      const nextY = Number.isFinite(params.y) ? params.y : targetNode.position.y;
+      const resizedNodes = setNodeSize(currentNodes, nodeId, nextWidth, nextHeight);
+
+      if (
+        Math.abs(targetNode.position.x - nextX) < POSITION_EPSILON &&
+        Math.abs(targetNode.position.y - nextY) < POSITION_EPSILON
+      ) {
+        return { nextNodes: resizedNodes, blocked: false };
+      }
+
+      let moved = false;
+      const positionedNodes = resizedNodes.map((node) => {
+        if (node.id !== nodeId) {
+          return node;
+        }
+
+        if (
+          Math.abs(node.position.x - nextX) < POSITION_EPSILON &&
+          Math.abs(node.position.y - nextY) < POSITION_EPSILON
+        ) {
+          return node;
+        }
+
+        moved = true;
+
+        return {
+          ...node,
+          position: {
+            x: nextX,
+            y: nextY,
+          },
+        };
+      });
+
+      return {
+        nextNodes: moved ? positionedNodes : resizedNodes,
+        blocked: false,
+      };
+    },
+    []
+  );
+
+  const handleNodeResize = useCallback(
+    (nodeId: string, params: NodeResizePayload) => {
+      let blocked = false;
+
+      setNodes((currentNodes) => {
+        const result = applyNodeResize(currentNodes, nodeId, params);
+
+        blocked = result.blocked;
+        return result.nextNodes;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+    },
+    [applyNodeResize, setNodes, showLayerLockedToast]
+  );
+
+  const handleNodeResizeEnd = useCallback(
+    (nodeId: string, params: NodeResizePayload) => {
+      let blocked = false;
+
+      setNodes((currentNodes) => {
+        const result = applyNodeResize(currentNodes, nodeId, params);
+
+        blocked = result.blocked;
+
+        if (result.nextNodes !== currentNodes) {
+          pushHistorySnapshot({ nodes: result.nextNodes });
+        }
+
+        return result.nextNodes;
+      });
+
+      if (blocked) {
+        showLayerLockedToast();
+      }
+    },
+    [applyNodeResize, pushHistorySnapshot, setNodes, showLayerLockedToast]
+  );
+
   const mutateDataTableNode = useCallback(
     (
       nodeId: string,
@@ -615,10 +741,6 @@ export function EditorShell({
             data: {
               ...node.data,
               dataModel: nextModel,
-              size: {
-                ...node.data.size,
-                height: getDataTableNodeHeight(nextModel.fields.length),
-              },
             },
           };
         });
@@ -916,7 +1038,11 @@ export function EditorShell({
         nodes: toFlowNodes(
           normalizedPage.nodes,
           handleNodeTextChange,
-          showLayerLockedToast
+          showLayerLockedToast,
+          {
+            onResize: handleNodeResize,
+            onResizeEnd: handleNodeResizeEnd,
+          }
         ),
         edges: applyEdgeStyle(
           toFlowEdges(normalizedPage.edges),
@@ -928,7 +1054,7 @@ export function EditorShell({
         settings: normalizedPage.settings,
       };
     },
-    [handleNodeTextChange, showLayerLockedToast]
+    [handleNodeResize, handleNodeResizeEnd, handleNodeTextChange, showLayerLockedToast]
   );
 
   const applyHistorySnapshot = useCallback(
@@ -989,7 +1115,11 @@ export function EditorShell({
       const flowNodes = toFlowNodes(
         normalizedPage.nodes,
         handleNodeTextChange,
-        showLayerLockedToast
+        showLayerLockedToast,
+        {
+          onResize: handleNodeResize,
+          onResizeEnd: handleNodeResizeEnd,
+        }
       );
       const flowEdges = applyEdgeStyle(
         toFlowEdges(normalizedPage.edges),
@@ -1016,7 +1146,15 @@ export function EditorShell({
       setLayers(sortedLayers);
       setActiveLayerId(resolvedActiveLayerId);
     },
-    [handleNodeTextChange, setEdges, setNodes, setStrokes, showLayerLockedToast]
+    [
+      handleNodeResize,
+      handleNodeResizeEnd,
+      handleNodeTextChange,
+      setEdges,
+      setNodes,
+      setStrokes,
+      showLayerLockedToast,
+    ]
   );
 
   const buildRuntimePage = useCallback((basePage: DiagramPage): DiagramPage => {
@@ -1638,6 +1776,7 @@ export function EditorShell({
         ...options,
         pixelRatio: PNG_EXPORT_SCALE,
         cacheBust: true,
+        filter: (domNode) => !domNode.classList.contains("react-flow__resize-control"),
       });
       downloadFromDataUrl(dataUrl, "png");
       toast.success("PNG exported.");
@@ -1668,6 +1807,7 @@ export function EditorShell({
       const dataUrl = await toSvg(viewportElement, {
         ...options,
         cacheBust: true,
+        filter: (domNode) => !domNode.classList.contains("react-flow__resize-control"),
       });
       downloadFromDataUrl(dataUrl, "svg");
       toast.success("SVG exported.");
@@ -1997,6 +2137,7 @@ export function EditorShell({
       const filtered = changes.filter((change) => {
         if (
           change.type !== "position" &&
+          change.type !== "dimensions" &&
           change.type !== "remove" &&
           change.type !== "select"
         ) {
@@ -2447,7 +2588,10 @@ export function EditorShell({
       setNodes((currentNodes) => {
         const nextNodes = [
           ...currentNodes,
-          ...toFlowNodes([nodeRecord], handleNodeTextChange, showLayerLockedToast),
+          ...toFlowNodes([nodeRecord], handleNodeTextChange, showLayerLockedToast, {
+            onResize: handleNodeResize,
+            onResizeEnd: handleNodeResizeEnd,
+          }),
         ];
 
         pushHistorySnapshot({ nodes: nextNodes });
@@ -2457,6 +2601,8 @@ export function EditorShell({
       setActiveTool("select");
     },
     [
+      handleNodeResize,
+      handleNodeResizeEnd,
       handleNodeTextChange,
       pushHistorySnapshot,
       resolveInsertionLayer,
@@ -2518,7 +2664,11 @@ export function EditorShell({
           [nodeRecord],
           handleNodeTextChange,
           showLayerLockedToast,
-          { autoEditNodeId }
+          {
+            autoEditNodeId,
+            onResize: handleNodeResize,
+            onResizeEnd: handleNodeResizeEnd,
+          }
         );
         const nextNodes = [
           ...currentNodes,
@@ -2534,6 +2684,8 @@ export function EditorShell({
     [
       activeTool,
       gridSize,
+      handleNodeResize,
+      handleNodeResizeEnd,
       handleNodeTextChange,
       pushHistorySnapshot,
       resolveInsertionLayer,

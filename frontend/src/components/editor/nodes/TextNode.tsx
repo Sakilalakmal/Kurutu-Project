@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Handle, NodeResizer, Position, type Node, type NodeProps } from "@xyflow/react";
+import { getNodeMinSize } from "@/lib/editor/size";
 import type { EditorNodeData } from "@/lib/diagram/mapper";
 import { cn } from "@/lib/utils";
 
@@ -15,10 +16,13 @@ const fontSizeClassMap: Record<number, string> = {
   20: "text-xl",
 };
 
-export function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
+const textNodeMinSize = getNodeMinSize("textNode");
+
+export const TextNode = memo(function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
   const [isEditing, setIsEditing] = useState(() => Boolean(data.autoEdit));
   const [draftText, setDraftText] = useState(data.text);
   const editableRef = useRef<HTMLDivElement | null>(null);
+  const isResizable = selected && !data.isLocked && !data.isReadOnly;
 
   const textClassName = useMemo(() => {
     const configuredSize = Math.round(data.style.fontSize ?? 16);
@@ -58,7 +62,7 @@ export function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
   return (
     <div
       className={cn(
-        "relative min-w-[120px] rounded-md border border-transparent bg-transparent px-2 py-1",
+        "relative min-w-[120px] overflow-hidden rounded-md border border-transparent bg-transparent px-2 py-1",
         selected ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white" : "ring-0",
         !selected && data.relationHighlight === "strong"
           ? "ring-2 ring-cyan-500/90 ring-offset-1 ring-offset-white"
@@ -70,7 +74,7 @@ export function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
       style={{
         color: data.style.textColor,
         width: data.size.width,
-        minHeight: data.size.height,
+        height: data.size.height,
       }}
       onDoubleClick={() => {
         if (data.isReadOnly) {
@@ -86,6 +90,15 @@ export function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
         setIsEditing(true);
       }}
     >
+      <NodeResizer
+        isVisible={isResizable}
+        minWidth={textNodeMinSize.minWidth}
+        minHeight={textNodeMinSize.minHeight}
+        handleClassName="!h-2.5 !w-2.5 !rounded-[4px] !border !border-white !bg-blue-500 shadow-sm"
+        lineClassName="!border-blue-400/70"
+        onResize={(_, params) => data.onResize?.(id, params)}
+        onResizeEnd={(_, params) => data.onResizeEnd?.(id, params)}
+      />
       <Handle
         type="target"
         position={Position.Left}
@@ -136,10 +149,15 @@ export function TextNode({ id, data, selected }: NodeProps<EditorFlowNode>) {
           {draftText}
         </div>
       ) : (
-        <p className={cn("pointer-events-none min-w-[96px] whitespace-pre-wrap", textClassName)}>
+        <p
+          className={cn(
+            "pointer-events-none min-w-[96px] whitespace-pre-wrap break-words",
+            textClassName
+          )}
+        >
           {data.text}
         </p>
       )}
     </div>
   );
-}
+});

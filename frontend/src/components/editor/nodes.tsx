@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
-import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
+import { memo, useMemo, useState, type ReactNode } from "react";
+import { Handle, NodeResizer, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react";
 import { DataTableNode } from "@/components/editor/nodes/DataTableNode";
 import { TextNode } from "@/components/editor/nodes/TextNode";
+import { getNodeMinSize } from "@/lib/editor/size";
 import type { EditorNodeData } from "@/lib/diagram/mapper";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +50,8 @@ function EditableNodeFrame({
   const shouldRenderStickyAccent = kind === "sticky";
   const isLocked = data.isLocked;
   const isReadOnly = data.isReadOnly;
+  const isResizable = selected && !isLocked && !isReadOnly;
+  const minSize = useMemo(() => getNodeMinSize(kind), [kind]);
 
   const textColorClass = useMemo(
     () => (kind === "sticky" ? "font-medium text-[13px]" : "text-sm"),
@@ -97,6 +100,15 @@ function EditableNodeFrame({
         setIsEditing(true);
       }}
     >
+      <NodeResizer
+        isVisible={isResizable}
+        minWidth={minSize.minWidth}
+        minHeight={minSize.minHeight}
+        handleClassName="!h-2.5 !w-2.5 !rounded-[4px] !border !border-white !bg-blue-500 shadow-sm"
+        lineClassName="!border-blue-400/70"
+        onResize={(_, params) => data.onResize?.(id, params)}
+        onResizeEnd={(_, params) => data.onResizeEnd?.(id, params)}
+      />
       <Handle
         type="target"
         position={Position.Left}
@@ -141,45 +153,47 @@ function EditableNodeFrame({
           }}
         />
       ) : (
-        <div className={cn("pointer-events-none w-full", textColorClass)}>{children}</div>
+        <div className={cn("pointer-events-none h-full w-full overflow-hidden", textColorClass)}>
+          {children}
+        </div>
       )}
     </div>
   );
 }
 
-function RectangleNode(props: NodeProps<EditorFlowNode>) {
+const RectangleNode = memo(function RectangleNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="rectangle">
-      <p className="line-clamp-4 whitespace-pre-wrap">{props.data.text}</p>
+      <p className="whitespace-pre-wrap break-words">{props.data.text}</p>
     </EditableNodeFrame>
   );
-}
+});
 
-function EllipseNode(props: NodeProps<EditorFlowNode>) {
+const EllipseNode = memo(function EllipseNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="ellipse">
-      <p className="line-clamp-4 whitespace-pre-wrap">{props.data.text}</p>
+      <p className="whitespace-pre-wrap break-words">{props.data.text}</p>
     </EditableNodeFrame>
   );
-}
+});
 
-function StickyNode(props: NodeProps<EditorFlowNode>) {
+const StickyNode = memo(function StickyNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="sticky">
-      <p className="line-clamp-4 whitespace-pre-wrap">{props.data.text}</p>
+      <p className="whitespace-pre-wrap break-words">{props.data.text}</p>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeButtonNode(props: NodeProps<EditorFlowNode>) {
+const WireframeButtonNode = memo(function WireframeButtonNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeButton">
       <p className="font-medium tracking-tight">{props.data.text}</p>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeInputNode(props: NodeProps<EditorFlowNode>) {
+const WireframeInputNode = memo(function WireframeInputNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeInput">
       <div className="flex w-full items-center justify-between gap-2 rounded-md border border-black/10 bg-white/70 px-2.5 py-2 text-left">
@@ -188,9 +202,9 @@ function WireframeInputNode(props: NodeProps<EditorFlowNode>) {
       </div>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeCardNode(props: NodeProps<EditorFlowNode>) {
+const WireframeCardNode = memo(function WireframeCardNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeCard">
       <div className="w-full space-y-3 text-left">
@@ -203,17 +217,17 @@ function WireframeCardNode(props: NodeProps<EditorFlowNode>) {
       </div>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeAvatarNode(props: NodeProps<EditorFlowNode>) {
+const WireframeAvatarNode = memo(function WireframeAvatarNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeAvatar">
       <p className="text-xs font-semibold tracking-wide uppercase">{props.data.text}</p>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeNavbarNode(props: NodeProps<EditorFlowNode>) {
+const WireframeNavbarNode = memo(function WireframeNavbarNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeNavbar">
       <div className="flex w-full items-center justify-between gap-2 text-left">
@@ -226,9 +240,9 @@ function WireframeNavbarNode(props: NodeProps<EditorFlowNode>) {
       </div>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeSidebarNode(props: NodeProps<EditorFlowNode>) {
+const WireframeSidebarNode = memo(function WireframeSidebarNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeSidebar">
       <div className="w-full space-y-3 text-left">
@@ -240,9 +254,9 @@ function WireframeSidebarNode(props: NodeProps<EditorFlowNode>) {
       </div>
     </EditableNodeFrame>
   );
-}
+});
 
-function WireframeModalNode(props: NodeProps<EditorFlowNode>) {
+const WireframeModalNode = memo(function WireframeModalNode(props: NodeProps<EditorFlowNode>) {
   return (
     <EditableNodeFrame {...props} kind="wireframeModal">
       <div className="w-full space-y-3 text-left">
@@ -259,7 +273,7 @@ function WireframeModalNode(props: NodeProps<EditorFlowNode>) {
       </div>
     </EditableNodeFrame>
   );
-}
+});
 
 export const editorNodeTypes: NodeTypes = {
   rectangle: RectangleNode,
