@@ -28,6 +28,10 @@ export type NodeResizePayload = {
   height: number;
 };
 
+export type NodeResizeLivePayload = NodeResizePayload & {
+  direction: number[];
+};
+
 export type EditorNodeData = {
   text: string;
   size: {
@@ -59,7 +63,8 @@ export type EditorNodeData = {
   onDataTableFieldAdd?: (nodeId: string) => void;
   onDataTableFieldDelete?: (nodeId: string, fieldId: string) => void;
   onDataTableFieldMove?: (nodeId: string, fieldId: string, direction: "up" | "down") => void;
-  onResize?: (nodeId: string, params: NodeResizePayload) => void;
+  onResizeStart?: (nodeId: string, params: NodeResizePayload) => void;
+  onResize?: (nodeId: string, params: NodeResizeLivePayload) => void;
   onResizeEnd?: (nodeId: string, params: NodeResizePayload) => void;
   onLockedInteraction: () => void;
 };
@@ -99,7 +104,8 @@ export const toFlowNodes = (
   options?: {
     readOnly?: boolean;
     autoEditNodeId?: string | null;
-    onResize?: (nodeId: string, params: NodeResizePayload) => void;
+    onResizeStart?: (nodeId: string, params: NodeResizePayload) => void;
+    onResize?: (nodeId: string, params: NodeResizeLivePayload) => void;
     onResizeEnd?: (nodeId: string, params: NodeResizePayload) => void;
   }
 ): Node<EditorNodeData>[] =>
@@ -130,6 +136,7 @@ export const toFlowNodes = (
         isReadOnly: options?.readOnly ?? false,
         autoEdit: options?.autoEditNodeId === record.id,
         dataModel,
+        onResizeStart: options?.onResizeStart,
         onResize: options?.onResize,
         onResizeEnd: options?.onResizeEnd,
         onTextChange,

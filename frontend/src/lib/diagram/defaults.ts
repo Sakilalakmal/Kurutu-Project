@@ -25,7 +25,7 @@ export const DEFAULT_VIEWPORT: DiagramViewport = {
   zoom: 1,
 };
 
-export const DEFAULT_GRID_SIZE = 10;
+export const DEFAULT_GRID_SIZE = 8;
 
 export const DEFAULT_SETTINGS: DiagramSettings = {
   snapEnabled: true,

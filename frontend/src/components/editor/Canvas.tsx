@@ -27,8 +27,8 @@ import { SnapGuidesOverlay } from "@/components/editor/SnapGuidesOverlay";
 import { ASSET_DRAG_MIME } from "@/lib/assets/catalog";
 import { toConnectionLineType, toRuntimeEdgeType } from "@/lib/diagram/edges";
 import type { EditorEdge, EditorNodeData } from "@/lib/diagram/mapper";
+import type { SnapGuides } from "@/lib/editor/snap";
 import type { DiagramPresenceUser } from "@/lib/realtime/events";
-import type { SnapGuides } from "@/lib/diagram/smartSnap";
 import type {
   DiagramEdgeType,
   DiagramStroke,
@@ -245,7 +245,8 @@ function EditorCanvasInner({
         panOnScroll
         panActivationKeyCode="Space"
         deleteKeyCode={null}
-        snapToGrid={snapEnabled}
+        // Smart/grid snapping is controlled in editor-shell and committed on release.
+        snapToGrid={snapEnabled && false}
         snapGrid={[gridSize, gridSize]}
         minZoom={0.2}
         maxZoom={2.2}

@@ -6,6 +6,7 @@ import {
   Copy,
   GitBranch,
   Image as ImageIcon,
+  Magnet,
   MessageSquare,
   Moon,
   Save,
@@ -62,6 +63,8 @@ type EditorTopbarProps = {
   isPageDisabled?: boolean;
   onOpenChat: () => void;
   onOpenTemplates: () => void;
+  snapEnabled: boolean;
+  onToggleSnap: () => void;
   onExportPng: () => void;
   onExportSvg: () => void;
   exportBackground: ExportBackground;
@@ -111,6 +114,8 @@ export function EditorTopbar({
   isPageDisabled,
   onOpenChat,
   onOpenTemplates,
+  snapEnabled,
+  onToggleSnap,
   onExportPng,
   onExportSvg,
   exportBackground,
@@ -174,6 +179,27 @@ export function EditorTopbar({
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Create a new page from template</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className={cn(
+                  "h-8 rounded-lg border-zinc-200 bg-white text-zinc-700 shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] transition-transform duration-200 hover:-translate-y-0.5 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
+                  snapEnabled &&
+                    "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800 dark:border-zinc-200 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-100"
+                )}
+                onClick={onToggleSnap}
+                aria-label="Toggle snap"
+                disabled={isPageDisabled}
+              >
+                <Magnet className="size-4" />
+                <span>Snap</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Toggle grid and smart snapping</TooltipContent>
           </Tooltip>
 
           <ButtonGroup className="hidden overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-[0_8px_20px_-20px_rgba(15,23,42,0.7)] dark:border-zinc-700 dark:bg-zinc-900 md:flex">

@@ -83,7 +83,7 @@ export type DiagramEdgeType = z.infer<typeof diagramEdgeTypeSchema>;
 
 export const diagramSettingsSchema = z.object({
   snapEnabled: z.boolean().default(true),
-  gridSize: z.number().int().positive().default(10),
+  gridSize: z.number().int().positive().default(8),
   edgeStyle: diagramEdgeTypeSchema.default("smoothstep"),
   edgeAnimated: z.boolean().default(false),
 });
