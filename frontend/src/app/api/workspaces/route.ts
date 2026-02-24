@@ -16,6 +16,8 @@ export async function GET() {
       workspaces: memberships.map((membership) => ({
         id: membership.workspace.id,
         name: membership.workspace.name,
+        description: membership.workspace.description,
+        emojiIcon: membership.workspace.emojiIcon,
         slug: membership.workspace.slug,
         createdAt: membership.workspace.createdAt,
         updatedAt: membership.workspace.updatedAt,
@@ -53,6 +55,8 @@ export async function POST(request: Request) {
       const createdWorkspace = await tx.workspace.create({
         data: {
           name: parsed.data.name,
+          description: parsed.data.description ?? null,
+          emojiIcon: parsed.data.emojiIcon ?? null,
           createdByUserId: userId,
         },
       });
@@ -73,6 +77,8 @@ export async function POST(request: Request) {
         workspace: {
           id: workspace.id,
           name: workspace.name,
+          description: workspace.description,
+          emojiIcon: workspace.emojiIcon,
           slug: workspace.slug,
           createdAt: workspace.createdAt,
           updatedAt: workspace.updatedAt,

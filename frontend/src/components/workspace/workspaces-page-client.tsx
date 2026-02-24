@@ -1,53 +1,82 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, Plus } from "lucide-react";
+import { FolderKanban, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
-  listMyWorkspaces,
+  deleteWorkspace,
+  leaveWorkspace,
   type WorkspaceSummary,
+  updateWorkspaceName,
 } from "@/lib/workspace/api";
-import { WORKSPACE_STORAGE_KEY } from "@/lib/workspace/types";
+import { WORKSPACE_STORAGE_KEY, type WorkspaceCardData } from "@/lib/workspace/types";
 import { CreateWorkspaceDialog } from "@/components/workspace/create-workspace-dialog";
-import { Badge } from "@/components/ui/badge";
+import { WorkspaceCard } from "@/components/workspace/workspace-card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
 
-export function WorkspacesPageClient() {
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+type WorkspacesPageClientProps = {
+  initialWorkspaces: WorkspaceCardData[];
+};
+
+type PendingAction = {
+  type: "leave" | "delete";
+  workspace: WorkspaceCardData;
+};
+
+const mapSummaryToCard = (workspace: WorkspaceSummary): WorkspaceCardData => ({
+  id: workspace.id,
+  name: workspace.name,
+  description: workspace.description,
+  emojiIcon: workspace.emojiIcon,
+  slug: workspace.slug,
+  updatedAt: workspace.updatedAt,
+  role: workspace.role,
+  diagramCount: 0,
+  memberCount: 1,
+  membersPreview: [],
+  lastActivity: null,
+});
+
+export function WorkspacesPageClient({ initialWorkspaces }: WorkspacesPageClientProps) {
+  const [workspaces, setWorkspaces] = useState(initialWorkspaces);
+  const [searchQuery, setSearchQuery] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<WorkspaceCardData | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [isActionRunning, setIsActionRunning] = useState(false);
   const router = useRouter();
 
-  useEffect(() => {
-    let cancelled = false;
+  const filteredWorkspaces = useMemo(() => {
+    const normalized = searchQuery.trim().toLowerCase();
 
-    const loadWorkspaces = async () => {
-      try {
-        const result = await listMyWorkspaces();
+    if (!normalized) {
+      return workspaces;
+    }
 
-        if (!cancelled) {
-          setWorkspaces(result);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Failed to load workspaces.");
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
+    return workspaces.filter((workspace) => {
+      const haystack = `${workspace.name} ${workspace.description ?? ""}`.toLowerCase();
 
-    void loadWorkspaces();
+      return haystack.includes(normalized);
+    });
+  }, [searchQuery, workspaces]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const isBusy = isRenaming || isActionRunning;
 
   const handleOpenWorkspace = (workspaceId: string) => {
     if (typeof window !== "undefined") {
@@ -57,73 +86,256 @@ export function WorkspacesPageClient() {
     router.push(`/editor?workspaceId=${workspaceId}`);
   };
 
+  const handleRenameWorkspace = async () => {
+    if (!renameTarget) {
+      return;
+    }
+
+    const normalizedName = renameValue.trim();
+
+    if (!normalizedName) {
+      toast.error("Workspace name is required.");
+      return;
+    }
+
+    setIsRenaming(true);
+
+    try {
+      await updateWorkspaceName({
+        workspaceId: renameTarget.id,
+        name: normalizedName,
+      });
+
+      setWorkspaces((current) =>
+        current.map((workspace) =>
+          workspace.id === renameTarget.id
+            ? {
+                ...workspace,
+                name: normalizedName,
+                updatedAt: new Date().toISOString(),
+              }
+            : workspace
+        )
+      );
+      setRenameTarget(null);
+      setRenameValue("");
+      router.refresh();
+      toast.success("Workspace renamed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to rename workspace.");
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!pendingAction) {
+      return;
+    }
+
+    setIsActionRunning(true);
+
+    try {
+      if (pendingAction.type === "leave") {
+        await leaveWorkspace({
+          workspaceId: pendingAction.workspace.id,
+        });
+        toast.success("You left the workspace.");
+      } else {
+        await deleteWorkspace({
+          workspaceId: pendingAction.workspace.id,
+        });
+        toast.success("Workspace deleted.");
+      }
+
+      setWorkspaces((current) =>
+        current.filter((workspace) => workspace.id !== pendingAction.workspace.id)
+      );
+      setPendingAction(null);
+      router.refresh();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : pendingAction.type === "leave"
+            ? "Failed to leave workspace."
+            : "Failed to delete workspace."
+      );
+    } finally {
+      setIsActionRunning(false);
+    }
+  };
+
   return (
-    <main className="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">Workspaces</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Create, open, and manage your team workspaces.
-          </p>
+    <>
+      <main className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="text-3xl font-semibold tracking-tight">Workspaces</h1>
+            <p className="text-sm text-muted-foreground">
+              Manage your team spaces and diagrams.
+            </p>
+          </div>
+          <Button onClick={() => setIsCreateDialogOpen(true)} disabled={isBusy}>
+            <Plus className="size-4" />
+            Create Workspace
+          </Button>
+        </header>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search workspaces by name or description"
+            className="h-10 pl-9"
+            disabled={isBusy}
+          />
         </div>
-        <Button onClick={() => setIsCreateDialogOpen(true)}>
-          <Plus className="size-4" />
-          Create workspace
-        </Button>
-      </header>
 
-      <section className="grid gap-4 sm:grid-cols-2">
-        {isLoading ? (
-          <Card className="sm:col-span-2">
-            <CardContent className="py-8 text-center text-sm text-zinc-500">
-              Loading workspaces...
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {!isLoading && workspaces.length === 0 ? (
-          <Card className="sm:col-span-2">
-            <CardContent className="space-y-3 py-8 text-center">
-              <p className="text-sm text-zinc-500">No workspaces yet.</p>
-              <Button onClick={() => setIsCreateDialogOpen(true)}>Create your first workspace</Button>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {!isLoading
-          ? workspaces.map((workspace) => (
-              <Card key={workspace.id} className="border-zinc-200/80 dark:border-zinc-800">
-                <CardHeader className="space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="line-clamp-1 text-base">{workspace.name}</CardTitle>
-                    <Badge variant="secondary">{workspace.role}</Badge>
-                  </div>
-                  <p className="text-xs text-zinc-500">
-                    Updated {new Date(workspace.updatedAt).toLocaleDateString()}
-                  </p>
-                </CardHeader>
-                <CardContent className="flex items-center gap-2">
-                  <Button size="sm" onClick={() => handleOpenWorkspace(workspace.id)}>
-                    <Building2 className="size-4" />
-                    Open in editor
-                  </Button>
-                  <Button size="sm" variant="outline" asChild>
-                    <Link href={`/workspaces/${workspace.id}`}>Settings</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))
-          : null}
-      </section>
+        {workspaces.length === 0 ? (
+          <Empty className="min-h-[360px] rounded-2xl border border-dashed border-border/70 bg-card/70">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FolderKanban className="size-5" />
+              </EmptyMedia>
+              <EmptyTitle>No workspaces yet</EmptyTitle>
+              <EmptyDescription>Create your first collaborative space.</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button onClick={() => setIsCreateDialogOpen(true)} disabled={isBusy}>
+                <Plus className="size-4" />
+                Create Workspace
+              </Button>
+            </EmptyContent>
+          </Empty>
+        ) : filteredWorkspaces.length === 0 ? (
+          <Empty className="min-h-[280px] rounded-2xl border border-dashed border-border/70 bg-card/70">
+            <EmptyHeader>
+              <EmptyTitle>No matching workspaces</EmptyTitle>
+              <EmptyDescription>Try a different search keyword.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredWorkspaces.map((workspace) => (
+              <WorkspaceCard
+                key={workspace.id}
+                workspace={workspace}
+                onOpen={handleOpenWorkspace}
+                onOpenSettings={(workspaceId) => router.push(`/workspaces/${workspaceId}`)}
+                onRename={(targetWorkspace) => {
+                  setRenameTarget(targetWorkspace);
+                  setRenameValue(targetWorkspace.name);
+                }}
+                onLeave={(targetWorkspace) =>
+                  setPendingAction({
+                    type: "leave",
+                    workspace: targetWorkspace,
+                  })
+                }
+                onDelete={(targetWorkspace) =>
+                  setPendingAction({
+                    type: "delete",
+                    workspace: targetWorkspace,
+                  })
+                }
+                disableActions={isBusy}
+              />
+            ))}
+          </section>
+        )}
+      </main>
 
       <CreateWorkspaceDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
         onCreated={(workspace) => {
-          setWorkspaces((current) => [workspace, ...current]);
+          setWorkspaces((current) => [mapSummaryToCard(workspace), ...current]);
           handleOpenWorkspace(workspace.id);
         }}
       />
-    </main>
+
+      <Dialog
+        open={Boolean(renameTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenameTarget(null);
+            setRenameValue("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename workspace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="workspace-rename-input" className="text-sm font-medium">
+              Workspace name
+            </label>
+            <Input
+              id="workspace-rename-input"
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              maxLength={80}
+              disabled={isRenaming}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleRenameWorkspace();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRenameTarget(null);
+                setRenameValue("");
+              }}
+              disabled={isRenaming}
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => void handleRenameWorkspace()} disabled={isRenaming}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={Boolean(pendingAction)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingAction(null);
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {pendingAction?.type === "delete" ? "Delete workspace?" : "Leave workspace?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction?.type === "delete"
+                ? "This action cannot be undone."
+                : "You will lose access until someone invites you again."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isActionRunning}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant={pendingAction?.type === "delete" ? "destructive" : "default"}
+              onClick={() => void handleConfirmAction()}
+              disabled={isActionRunning}
+            >
+              {pendingAction?.type === "delete" ? "Delete" : "Leave"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
