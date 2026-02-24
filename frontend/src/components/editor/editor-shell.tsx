@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toPng, toSvg } from "html-to-image";
-import { ChevronLeft, ChevronRight, Layers3 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Layers3, Terminal } from "lucide-react";
 import {
   type Connection,
   type Node,
@@ -3312,7 +3312,6 @@ export function EditorShell({
               onAddPage={handleAddPage}
               isPageDisabled={isLoading}
               onOpenChat={() => setIsChatSheetOpen(true)}
-              onOpenActivity={() => setIsActivitySheetOpen(true)}
               onOpenTemplates={() => setIsTemplatesOpen(true)}
               snapEnabled={snapEnabled}
               onToggleSnap={toggleSnapEnabled}
@@ -3333,7 +3332,6 @@ export function EditorShell({
               onCopyShareUrl={handleCopyShareUrl}
               isCopyShareSuccess={isCopyShareSuccess}
               diagramPresenceUsers={diagramPresenceUsers}
-              isActivityDisabled={!currentWorkspaceId}
             />
             <div className="border-b border-zinc-200/70 bg-white/70 px-3 py-1.5 dark:border-zinc-800/70 dark:bg-zinc-950/70 sm:px-5">
               <div className="flex items-center gap-2 text-xs">
@@ -3356,6 +3354,17 @@ export function EditorShell({
             <div className="flex min-h-0 flex-1 gap-3 p-3 md:gap-4 md:p-5">
               <aside className="min-h-0 w-[280px] shrink-0">
                 <div className="flex h-full flex-col gap-3 overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-10 w-full justify-start rounded-xl border border-cyan-700 bg-cyan-600 px-3 text-white shadow-[0_12px_26px_-18px_rgba(8,145,178,0.95)] transition-transform duration-200 hover:-translate-y-0.5 hover:bg-cyan-500 active:bg-cyan-700 focus-visible:ring-2 focus-visible:ring-cyan-500 dark:border-cyan-300 dark:bg-cyan-400 dark:text-zinc-950 dark:hover:bg-cyan-300 disabled:opacity-60"
+                    aria-label="Open activity log"
+                    onClick={() => setIsActivitySheetOpen(true)}
+                    disabled={!realtimeWorkspaceId}
+                  >
+                    <Terminal className="size-4" />
+                    <span>Activity</span>
+                  </Button>
                   <EditorToolbar
                     activeTool={activeTool}
                     onToolSelect={setActiveTool}
@@ -3577,7 +3586,7 @@ export function EditorShell({
       <ActivityTerminalDrawer
         open={isActivitySheetOpen}
         onOpenChange={setIsActivitySheetOpen}
-        workspaceId={currentWorkspaceId}
+        workspaceId={realtimeWorkspaceId}
         diagramId={diagramId}
       />
       <TemplatesDialog

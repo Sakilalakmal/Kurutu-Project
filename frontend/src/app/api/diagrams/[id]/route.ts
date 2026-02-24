@@ -98,7 +98,7 @@ export async function PUT(
 
   const diagram = await prisma.diagram.findUnique({
     where: { id: diagramId },
-    select: { id: true, userId: true, workspaceId: true, data: true },
+    select: { id: true, userId: true, workspaceId: true, title: true, data: true },
   });
 
   if (!diagram) {
@@ -142,6 +142,37 @@ export async function PUT(
           nextData: parsedPayload.data.data,
         })
       : [];
+
+  const nextTitle = parsedPayload.data.title ?? diagram.title;
+  const titleChanged = nextTitle !== diagram.title;
+  const previousDocument = JSON.stringify(migrateDiagramData(diagram.data));
+  const nextDocument = JSON.stringify(migrateDiagramData(parsedPayload.data.data));
+  const dataChanged = previousDocument !== nextDocument;
+
+  if (
+    diagram.workspaceId &&
+    actorRole &&
+    activityEntries.length === 0 &&
+    (titleChanged || dataChanged)
+  ) {
+    activityEntries.push({
+      workspaceId: diagram.workspaceId,
+      diagramId,
+      actorUserId: userId,
+      actionType: "DIAGRAM_UPDATE",
+      entityType: "DIAGRAM",
+      entityId: diagramId,
+      summary: titleChanged
+        ? `renamed diagram "${diagram.title}" to "${nextTitle}"`
+        : `updated diagram "${nextTitle}"`,
+      metadata: {
+        actorRole,
+        previousTitle: diagram.title,
+        nextTitle,
+        dataChanged,
+      },
+    });
+  }
 
   const updatedDiagram = await prisma.$transaction(async (tx) => {
     const updated = await tx.diagram.update({

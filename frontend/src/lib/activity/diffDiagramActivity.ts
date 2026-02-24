@@ -1,6 +1,7 @@
 import { migrateDiagramData } from "@/lib/diagram/migrate";
 import type {
   DataTableField,
+  DiagramNodeType,
   RelationLabelMode,
   RelationType,
 } from "@/lib/diagram/types";
@@ -12,6 +13,13 @@ type DataTableInfo = {
   pageId: string;
   tableName: string;
   fieldsById: Map<string, DataTableField>;
+};
+
+type NodeInfo = {
+  id: string;
+  pageId: string;
+  type: DiagramNodeType;
+  text: string;
 };
 
 type RelationInfo = {
@@ -29,6 +37,7 @@ type RelationInfo = {
 };
 
 type DiagramActivitySnapshot = {
+  nodesById: Map<string, NodeInfo>;
   tablesById: Map<string, DataTableInfo>;
   relationsById: Map<string, RelationInfo>;
 };
@@ -46,13 +55,88 @@ type ActivityDraft = Omit<LogActivityInput, "tx">;
 
 const sortedIds = (ids: Iterable<string>) => [...ids].sort((left, right) => left.localeCompare(right));
 
+const NODE_TYPE_LABELS: Record<DiagramNodeType, string> = {
+  rectangle: "rectangle",
+  ellipse: "ellipse",
+  sticky: "sticky note",
+  textNode: "text",
+  dataTable: "table",
+  wireframeButton: "wireframe button",
+  wireframeInput: "wireframe input",
+  wireframeCard: "wireframe card",
+  wireframeAvatar: "wireframe avatar",
+  wireframeNavbar: "wireframe navbar",
+  wireframeSidebar: "wireframe sidebar",
+  wireframeModal: "wireframe modal",
+};
+
+const MAX_NODE_TEXT_LENGTH = 80;
+
+const normalizeNodeText = (value: string) => {
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  if (trimmed.length <= MAX_NODE_TEXT_LENGTH) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, MAX_NODE_TEXT_LENGTH - 3)}...`;
+};
+
+const resolveNodeLabel = (nodeType: DiagramNodeType) => NODE_TYPE_LABELS[nodeType] ?? "node";
+
+const buildNodeCreateSummary = (node: NodeInfo) => {
+  const nodeLabel = resolveNodeLabel(node.type);
+  const nodeText = normalizeNodeText(node.text);
+
+  return nodeText ? `created ${nodeLabel} "${nodeText}"` : `created ${nodeLabel}`;
+};
+
+const buildNodeDeleteSummary = (node: NodeInfo) => {
+  const nodeLabel = resolveNodeLabel(node.type);
+  const nodeText = normalizeNodeText(node.text);
+
+  return nodeText ? `deleted ${nodeLabel} "${nodeText}"` : `deleted ${nodeLabel}`;
+};
+
+const buildNodeUpdateSummary = (previousNode: NodeInfo, nextNode: NodeInfo) => {
+  const previousText = normalizeNodeText(previousNode.text);
+  const nextText = normalizeNodeText(nextNode.text);
+
+  if (previousNode.type !== nextNode.type) {
+    const previousLabel = resolveNodeLabel(previousNode.type);
+    const nextLabel = resolveNodeLabel(nextNode.type);
+
+    return nextText
+      ? `changed ${previousLabel} to ${nextLabel} "${nextText}"`
+      : `changed ${previousLabel} to ${nextLabel}`;
+  }
+
+  if (previousText && nextText && previousText !== nextText) {
+    return `renamed ${resolveNodeLabel(nextNode.type)} "${previousText}" to "${nextText}"`;
+  }
+
+  return `updated ${resolveNodeLabel(nextNode.type)}`;
+};
+
 const mapDiagramSnapshot = (input: unknown): DiagramActivitySnapshot => {
   const document = migrateDiagramData(input);
+  const nodesById = new Map<string, NodeInfo>();
   const tablesById = new Map<string, DataTableInfo>();
   const relationsById = new Map<string, RelationInfo>();
 
   for (const page of document.pages) {
     for (const node of page.nodes) {
+      nodesById.set(node.id, {
+        id: node.id,
+        pageId: page.id,
+        type: node.type,
+        text: node.type === "dataTable" && node.data ? node.data.tableName : node.text,
+      });
+
       if (node.type !== "dataTable" || !node.data) {
         continue;
       }
@@ -87,6 +171,7 @@ const mapDiagramSnapshot = (input: unknown): DiagramActivitySnapshot => {
   }
 
   return {
+    nodesById,
     tablesById,
     relationsById,
   };
@@ -151,6 +236,100 @@ export const diffDiagramActivity = ({
   const previousSnapshot = mapDiagramSnapshot(previousData);
   const nextSnapshot = mapDiagramSnapshot(nextData);
   const activities: ActivityDraft[] = [];
+
+  for (const nodeId of sortedIds(nextSnapshot.nodesById.keys())) {
+    if (previousSnapshot.nodesById.has(nodeId)) {
+      continue;
+    }
+
+    const nextNode = nextSnapshot.nodesById.get(nodeId);
+
+    if (!nextNode || nextNode.type === "dataTable") {
+      continue;
+    }
+
+    activities.push({
+      workspaceId,
+      diagramId,
+      actorUserId,
+      actionType: "NODE_CREATE",
+      entityType: "NODE",
+      entityId: nodeId,
+      summary: buildNodeCreateSummary(nextNode),
+      metadata: {
+        actorRole,
+        pageId: nextNode.pageId,
+        nodeType: nextNode.type,
+        nodeText: normalizeNodeText(nextNode.text),
+      },
+    });
+  }
+
+  for (const nodeId of sortedIds(previousSnapshot.nodesById.keys())) {
+    const previousNode = previousSnapshot.nodesById.get(nodeId);
+
+    if (!previousNode || previousNode.type === "dataTable") {
+      continue;
+    }
+
+    const nextNode = nextSnapshot.nodesById.get(nodeId);
+
+    if (!nextNode) {
+      activities.push({
+        workspaceId,
+        diagramId,
+        actorUserId,
+        actionType: "NODE_DELETE",
+        entityType: "NODE",
+        entityId: nodeId,
+        summary: buildNodeDeleteSummary(previousNode),
+        metadata: {
+          actorRole,
+          pageId: previousNode.pageId,
+          nodeType: previousNode.type,
+          nodeText: normalizeNodeText(previousNode.text),
+        },
+      });
+      continue;
+    }
+
+    if (nextNode.type === "dataTable") {
+      continue;
+    }
+
+    const nodeChanged =
+      previousNode.type !== nextNode.type ||
+      previousNode.text !== nextNode.text ||
+      previousNode.pageId !== nextNode.pageId;
+
+    if (!nodeChanged) {
+      continue;
+    }
+
+    activities.push({
+      workspaceId,
+      diagramId,
+      actorUserId,
+      actionType: "NODE_UPDATE",
+      entityType: "NODE",
+      entityId: nodeId,
+      summary: buildNodeUpdateSummary(previousNode, nextNode),
+      metadata: {
+        actorRole,
+        pageId: nextNode.pageId,
+        previous: {
+          pageId: previousNode.pageId,
+          nodeType: previousNode.type,
+          nodeText: normalizeNodeText(previousNode.text),
+        },
+        next: {
+          pageId: nextNode.pageId,
+          nodeType: nextNode.type,
+          nodeText: normalizeNodeText(nextNode.text),
+        },
+      },
+    });
+  }
 
   for (const tableId of sortedIds(nextSnapshot.tablesById.keys())) {
     if (previousSnapshot.tablesById.has(tableId)) {

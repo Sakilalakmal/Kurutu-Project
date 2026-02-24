@@ -13,7 +13,6 @@ import {
   Share2,
   Sparkles,
   Sun,
-  Terminal,
   WandSparkles,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -63,7 +62,6 @@ type EditorTopbarProps = {
   onAddPage: () => void;
   isPageDisabled?: boolean;
   onOpenChat: () => void;
-  onOpenActivity: () => void;
   onOpenTemplates: () => void;
   snapEnabled: boolean;
   onToggleSnap: () => void;
@@ -84,7 +82,6 @@ type EditorTopbarProps = {
   onCopyShareUrl: () => void;
   isCopyShareSuccess: boolean;
   diagramPresenceUsers: DiagramPresenceUser[];
-  isActivityDisabled?: boolean;
 };
 
 const getInitials = (value: string) => {
@@ -116,7 +113,6 @@ export function EditorTopbar({
   onAddPage,
   isPageDisabled,
   onOpenChat,
-  onOpenActivity,
   onOpenTemplates,
   snapEnabled,
   onToggleSnap,
@@ -137,7 +133,6 @@ export function EditorTopbar({
   onCopyShareUrl,
   isCopyShareSuccess,
   diagramPresenceUsers,
-  isActivityDisabled,
 }: EditorTopbarProps) {
   const disableExport = !activePageId || isPageDisabled;
   const disableEdgeControls = !activePageId || isPageDisabled;
@@ -456,18 +451,6 @@ export function EditorTopbar({
           >
             <Save className="size-4" />
             {saveStatus === "saving" ? "Saving" : "Save"}
-          </Button>
-
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 rounded-lg border border-cyan-700 bg-cyan-600 text-white shadow-[0_12px_26px_-18px_rgba(8,145,178,0.95)] transition-transform duration-200 hover:-translate-y-0.5 hover:bg-cyan-500 active:bg-cyan-700 focus-visible:ring-2 focus-visible:ring-cyan-500 dark:border-cyan-300 dark:bg-cyan-400 dark:text-zinc-950 dark:hover:bg-cyan-300 disabled:opacity-60"
-            aria-label="Open activity log"
-            onClick={onOpenActivity}
-            disabled={isActivityDisabled}
-          >
-            <Terminal className="size-4" />
-            <span className="hidden sm:inline">Activity</span>
           </Button>
 
           <Button
