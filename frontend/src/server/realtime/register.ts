@@ -437,7 +437,6 @@ export const registerRealtimeHandlers = (io: RealtimeServer) => {
 
       const { workspaceId, diagramId, x, y } = parsedPayload.data;
       const roomId = toDiagramRoom(workspaceId, diagramId);
-      devLog("server recv cursor", socket.data.userId, workspaceId, diagramId);
 
       if (!socket.rooms.has(roomId)) {
         respond(ack, {
@@ -469,8 +468,6 @@ export const registerRealtimeHandlers = (io: RealtimeServer) => {
             now: t,
           }
         );
-        devLog("server emit room", roomId);
-
         socket.to(roomId).emit("diagram:cursor", {
           userId: socket.data.userId,
           name: socket.data.name,

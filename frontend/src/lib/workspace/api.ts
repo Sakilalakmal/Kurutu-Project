@@ -8,6 +8,8 @@ import {
 const workspaceSummarySchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  description: z.string().nullable(),
+  emojiIcon: z.string().nullable(),
   slug: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -50,6 +52,8 @@ const workspaceInviteSchema = z.object({
 const workspaceDetailsSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  description: z.string().nullable(),
+  emojiIcon: z.string().nullable(),
   slug: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -152,13 +156,25 @@ export const listMyWorkspaces = async () => {
   ).workspaces;
 };
 
-export const createWorkspace = async ({ name }: { name: string }) => {
+export const createWorkspace = async ({
+  name,
+  description,
+  emojiIcon,
+}: {
+  name: string;
+  description?: string;
+  emojiIcon?: string;
+}) => {
   const response = await fetch("/api/workspaces", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({
+      name,
+      description,
+      emojiIcon,
+    }),
   });
 
   if (!response.ok) {
@@ -306,6 +322,26 @@ export const removeWorkspaceMember = async ({
   memberId: string;
 }) => {
   const response = await fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw new WorkspaceApiError(await extractErrorMessage(response), response.status);
+  }
+};
+
+export const leaveWorkspace = async ({ workspaceId }: { workspaceId: string }) => {
+  const response = await fetch(`/api/workspaces/${workspaceId}/leave`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new WorkspaceApiError(await extractErrorMessage(response), response.status);
+  }
+};
+
+export const deleteWorkspace = async ({ workspaceId }: { workspaceId: string }) => {
+  const response = await fetch(`/api/workspaces/${workspaceId}`, {
     method: "DELETE",
   });
 

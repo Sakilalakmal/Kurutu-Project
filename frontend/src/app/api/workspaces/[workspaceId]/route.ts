@@ -67,6 +67,8 @@ export async function GET(
       workspace: {
         id: member.workspace.id,
         name: member.workspace.name,
+        description: member.workspace.description,
+        emojiIcon: member.workspace.emojiIcon,
         slug: member.workspace.slug,
         createdAt: member.workspace.createdAt,
         updatedAt: member.workspace.updatedAt,
@@ -137,5 +139,33 @@ export async function PATCH(
     }
 
     return NextResponse.json({ error: "Failed to update workspace." }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  context: {
+    params: Promise<{ workspaceId: string }> | { workspaceId: string };
+  }
+) {
+  try {
+    const workspaceId = await resolveWorkspaceId(context.params);
+    await requireWorkspaceRole(workspaceId, "OWNER");
+
+    await prisma.workspace.delete({
+      where: { id: workspaceId },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === "invalid_workspace_id") {
+      return NextResponse.json({ error: "Invalid workspace id." }, { status: 400 });
+    }
+
+    if (isWorkspaceAuthzError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    return NextResponse.json({ error: "Failed to delete workspace." }, { status: 500 });
   }
 }

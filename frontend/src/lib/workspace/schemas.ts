@@ -12,6 +12,18 @@ export const workspaceInviteTokenSchema = z.string().min(1);
 
 export const createWorkspaceSchema = z.object({
   name: z.string().trim().min(1).max(80),
+  description: z
+    .string()
+    .trim()
+    .max(240)
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
+  emojiIcon: z
+    .string()
+    .trim()
+    .max(16)
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
 });
 
 export const updateWorkspaceSchema = z.object({

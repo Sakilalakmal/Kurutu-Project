@@ -142,6 +142,8 @@ enum EntityType {
 model Workspace {
   id              String            @id @default(cuid())
   name            String
+  description     String?
+  emojiIcon       String?
   slug            String?           @unique
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt

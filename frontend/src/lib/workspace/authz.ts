@@ -56,6 +56,8 @@ export const requireWorkspaceMember = async (
         select: {
           id: true,
           name: true,
+          description: true,
+          emojiIcon: true,
           slug: true,
           createdAt: true,
           updatedAt: true,

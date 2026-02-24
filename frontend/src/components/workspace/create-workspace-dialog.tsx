@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 type CreateWorkspaceDialogProps = {
   open: boolean;
@@ -27,27 +28,47 @@ export function CreateWorkspaceDialog({
   onCreated,
 }: CreateWorkspaceDialogProps) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [emojiIcon, setEmojiIcon] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setName("");
+      setDescription("");
+      setEmojiIcon("");
       setIsSubmitting(false);
     }
   }, [open]);
 
   const handleCreate = async () => {
-    const normalized = name.trim();
+    const normalizedName = name.trim();
+    const normalizedDescription = description.trim();
+    const normalizedEmoji = emojiIcon.trim();
 
-    if (!normalized) {
+    if (!normalizedName) {
       toast.error("Workspace name is required.");
+      return;
+    }
+
+    if (normalizedDescription.length > 240) {
+      toast.error("Description must be 240 characters or fewer.");
+      return;
+    }
+
+    if (normalizedEmoji.length > 16) {
+      toast.error("Icon must be 16 characters or fewer.");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const workspace = await createWorkspace({ name: normalized });
+      const workspace = await createWorkspace({
+        name: normalizedName,
+        description: normalizedDescription || undefined,
+        emojiIcon: normalizedEmoji || undefined,
+      });
       toast.success("Workspace created.");
       onCreated?.(workspace);
       onOpenChange(false);
@@ -64,27 +85,58 @@ export function CreateWorkspaceDialog({
         <DialogHeader>
           <DialogTitle>Create workspace</DialogTitle>
           <DialogDescription>
-            Create a team workspace and start collaborating with invite links.
+            Set up a collaborative space for your diagrams and team activity.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-2">
-          <label htmlFor="workspace-name" className="text-sm font-medium">
-            Name
-          </label>
-          <Input
-            id="workspace-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Product Team"
-            maxLength={80}
-            disabled={isSubmitting}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void handleCreate();
-              }
-            }}
-          />
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="workspace-name" className="text-sm font-medium">
+              Name
+            </label>
+            <Input
+              id="workspace-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Product Team"
+              maxLength={80}
+              disabled={isSubmitting}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void handleCreate();
+                }
+              }}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="workspace-description" className="text-sm font-medium">
+              Description <span className="text-muted-foreground">(optional)</span>
+            </label>
+            <Textarea
+              id="workspace-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Shared diagrams for roadmap and architecture."
+              maxLength={240}
+              disabled={isSubmitting}
+              className="min-h-[92px] resize-none"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="workspace-emoji" className="text-sm font-medium">
+              Icon / Emoji <span className="text-muted-foreground">(optional)</span>
+            </label>
+            <Input
+              id="workspace-emoji"
+              value={emojiIcon}
+              onChange={(event) => setEmojiIcon(event.target.value)}
+              placeholder="🧩"
+              maxLength={16}
+              disabled={isSubmitting}
+            />
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
